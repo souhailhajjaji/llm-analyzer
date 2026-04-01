@@ -8,7 +8,7 @@ import requests
 from typing import Dict, List, Any, Optional
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-HF_API_URL = "https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-1B-Instruct"
+HF_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2-0.5B-Instruct"
 
 SYSTEM_PROMPT = """Tu es un expert en analyse de cahier des charges logiciels.
 Ton rôle est de détecter et classifier tous les problèmes dans un cahier des charges.
