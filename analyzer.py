@@ -207,6 +207,9 @@ class CahierDesChargesAnalyzer:
         regles = [
             ("en clair|base64", "SECURITE", "CRITIQUE", "Mots de passe stockés de manière non sécurisée", "Hasher les mots de passe avec bcrypt/argon2"),
             ("stockées en clair", "SECURITE", "CRITIQUE", "Données sensibles stockées en clair", "Chiffrer les données sensibles"),
+            ("sans chiffrement|sans chiffrement", "SECURITE", "CRITIQUE", "Données non chiffrées", "Chiffrer les données sensibles"),
+            ("accessible à tous|tous les utilisateurs ont accès|accès complet", "SECURITE", "CRITIQUE", "Accès données sans autorisation", "Implémenter un contrôle d'accès"),
+            ("api ouverte|api.*sans authentification|partenaires externes", "SECURITE", "ELEVEE", "API ouverte", "Implémenter une authentification"),
             ("sans authentification", "SECURITE", "CRITIQUE", "API sans authentification", "Implémenter une authentification JWT/OAuth"),
             ("pas de validation", "SECURITE", "CRITIQUE", "Aucune validation des entrées", "Valider toutes les entrées utilisateur"),
             ("sessions.*(jamais|infini)|n'expirent jamais|n'expire jamais", "SECURITE", "ELEVEE", "Sessions sans expiration", "Implémenter une expiration de session"),
@@ -216,16 +219,22 @@ class CahierDesChargesAnalyzer:
             ("comptes des autres|autrui", "SECURITE", "CRITIQUE", "Modification des comptes d'autrui", "Vérifier que l'utilisateur modifie son propre compte"),
             ("messages détaillés", "SECURITE", "MOYENNE", "Messages d'erreur détaillés (information leakage)", "Utiliser des messages génériques"),
             ("pas de limite.*tentatives|pas de limite de tentatives", "SECURITE", "ELEVEE", "Pas de limite de tentatives de connexion", "Implémenter un verrouillage après N tentatives"),
+            ("sauvegardes non chiffrées|backup.*non chiffré", "SECURITE", "CRITIQUE", "Sauvegardes non chiffrées", "Chiffrer les sauvegardes"),
             ("SQL Injection|sql injection", "EDGE_CASE", "ELEVEE", "Risque d'injection SQL", "Utiliser des requêtes paramétrées"),
             ("XSS|xss", "EDGE_CASE", "ELEVEE", "Risque XSS", "Échapper les entrées/sorties"),
             ("prix négatif|prix.*négatif", "EDGE_CASE", "MOYENNE", "Prix négatif non géré", "Valider les valeurs positives"),
             ("IDOR", "EDGE_CASE", "ELEVEE", "Risque IDOR", "Vérifier les autorisations sur les ressources"),
-            ("n'importe quelle longueur", "AMBIGUITE", "FAIBLE", "Mot de passe sans longueur minimale", "Exiger minimum 8 caractères"),
+            ("numéro.*相同|double.*numéro|même numéro", "EDGE_CASE", "MOYENNE", "Doublon de données non géré", "Implémenter des contraintes d'unicité"),
+            ("n'importe quelle longueur|minimum.*[0-9].*caractères", "AMBIGUITE", "FAIBLE", "Mot de passe sans longueur minimale", "Exiger minimum 8 caractères"),
             ("pas besoin d'être validé|pas.*validé", "AMBIGUITE", "MOYENNE", "Email non validé", "Valider l'email par lien de confirmation"),
             ("logs de sécurité|logs.*sécurité", "SECURITE", "MOYENNE", "Pas de logs de sécurité", "Implémenter une journalisation"),
             ("tokens.*pas.*sécurisés", "SECURITE", "ELEVEE", "Tokens non sécurisés", "Utiliser des tokens JWT signés avec expiration"),
             ("plusieurs rôles", "CONTRADICTION", "MOYENNE", "Contradiction sur les rôles", "Clarifier: un utilisateur peut avoir plusieurs rôles ou un seul"),
+            ("tout le monde peut|tous peuvent", "CONTRADICTION", "MOYENNE", "Rôles non définis", "Définir des rôles claire"),
+            ("secret médical|secret professionnel", "LEGAL", "ELEVEE", "Secret médical non respecté", "Respecter le secret médical"),
+            ("pas de droit|effacement|droit à l'effacement", "LEGAL", "ELEVEE", "Droit à l'effacement non respecté", "Implémenter le droit à l'effacement RGPD"),
             ("rgpd|revendues à des partenaires|indéfiniment", "LEGAL", "ELEVEE", "Problème de conformité RGPD", "Respecter le RGPD: droit à l'effacement, pas de revente de données"),
+            ("non traité|que se passe-t-il si", "AMBIGUITE", "MOYENNE", "Edge case non traité", "Documenter et gérer les cas limites"),
         ]
         
         texte_lower = texte.lower()

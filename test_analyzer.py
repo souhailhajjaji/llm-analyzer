@@ -63,6 +63,48 @@ class TestAnalyseRegles:
         legals = [p for p in result["problemes"] if p["categorie"] == "LEGAL"]
         assert len(legals) >= 1
 
+    def test_donnees_non_chiffrees(self):
+        """Détection données non chiffrées"""
+        texte = "Les données médicales sont stockées sans chiffrement"
+        result = analyser_cahier(texte)
+        problemes = [p for p in result["problemes"] if "chiffr" in p["titre"].lower()]
+        assert len(problemes) >= 1
+
+    def test_api_ouverte(self):
+        """Détection API ouverte"""
+        texte = "API ouverte pour les partenaires externes"
+        result = analyser_cahier(texte)
+        problemes = [p for p in result["problemes"] if "api" in p["titre"].lower()]
+        assert len(problemes) >= 1
+
+    def test_acces_sans_autorisation(self):
+        """Détection accès sans autorisation"""
+        texte = "Tous les utilisateurs ont accès complet"
+        result = analyser_cahier(texte)
+        problemes = [p for p in result["problemes"] if "accès" in p["titre"].lower()]
+        assert len(problemes) >= 1
+
+    def test_secret_medical(self):
+        """Détection secret médical"""
+        texte = "Pas de mention du secret médical"
+        result = analyser_cahier(texte)
+        legals = [p for p in result["problemes"] if p["categorie"] == "LEGAL"]
+        assert len(legals) >= 1
+
+    def test_edge_case_non_traite(self):
+        """Détection edge case non traité"""
+        texte = "Que se passe-t-il si le médecin n'est pas disponible?"
+        result = analyser_cahier(texte)
+        problemes = [p for p in result["problemes"] if "non traité" in p["titre"].lower()]
+        assert len(problemes) >= 1
+
+    def test_sauvegarde_non_chiffree(self):
+        """Détection sauvegardes non chiffrées"""
+        texte = "Sauvegardes non chiffrées"
+        result = analyser_cahier(texte)
+        problemes = [p for p in result["problemes"] if "sauvegarde" in p["titre"].lower()]
+        assert len(problemes) >= 1
+
     def test_prix_cote_client(self):
         """Détection prix côté client"""
         texte = "Le prix total est calculé côté client pour affichage rapide"
