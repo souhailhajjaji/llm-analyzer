@@ -126,16 +126,18 @@ def main():
     
     st.sidebar.header("⚙️ Configuration")
     
+    use_llm = st.sidebar.toggle("Utiliser Llama (HuggingFace)", value=False, help="Cochez pour utiliser le LLM, sinon uniquement rule-based")
+    
     api_token = st.sidebar.text_input(
-        "Token Hugging Face (optionnel)",
+        "Token Hugging Face",
         type="password",
-        help="Laissez vide pour utilisation gratuite limitée"
+        help="Entrez votre token HF pour utiliser Llama"
     )
     
     st.sidebar.markdown("""
     ---
-    **Sans token**: Utilisation gratuite limitée
-    **Avec token**: Accès prioritaire
+    **Toggle OFF**: Analyse rule-based rapide (29 règles)
+    **Toggle ON**: Analyse avec Llama 3.2 (plus lent)
     
     Obtenir un token gratuit sur:
     [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
@@ -207,7 +209,7 @@ def main():
     
     if analyze_btn and texte:
         with st.spinner("Analyse en cours..."):
-            result = analyser_cahier(texte, api_token if api_token else None)
+            result = analyser_cahier(texte, api_token if api_token else None, use_huggingface=use_llm)
             
             afficher_problemes(result)
             afficher_extraction(result)

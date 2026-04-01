@@ -7,8 +7,13 @@ import json
 import requests
 from typing import Dict, List, Any, Optional
 
+try:
+    from huggingface_hub import InferenceClient
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
-HF_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2-0.5B-Instruct"
 
 SYSTEM_PROMPT = """Tu es un expert en analyse de cahier des charges logiciels.
 Ton rôle est de détecter et classifier tous les problèmes dans un cahier des charges.
@@ -85,12 +90,13 @@ Réponds en JSON strictement. """
 
 
 class CahierDesChargesAnalyzer:
-    def __init__(self, api_token: Optional[str] = None, use_ollama: bool = True):
-        self.api_token = api_token
+    def __init__(self, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False):
+        self.api_token = api_token  # Token sera configuré par l'utilisateur
         self.use_ollama = use_ollama
+        self.use_huggingface = use_huggingface
         self.headers = {}
-        if api_token:
-            self.headers["Authorization"] = f"Bearer {api_token}"
+        if self.api_token:
+            self.headers["Authorization"] = f"Bearer {self.api_token}"
         self.headers["Content-Type"] = "application/json"
     
     def analyze(self, texte: str) -> Dict[str, Any]:
@@ -101,7 +107,12 @@ class CahierDesChargesAnalyzer:
             if result:
                 return result
         
-        return self._analyze_huggingface(texte)
+        if self.use_huggingface:
+            result = self._analyze_huggingface(texte)
+            if result and result.get("problemes"):
+                return result
+        
+        return self._analyse_regles(texte)
     
     def _analyze_ollama(self, texte: str) -> Optional[Dict[str, Any]]:
         """Analyse avec Ollama (local)"""
@@ -136,31 +147,38 @@ class CahierDesChargesAnalyzer:
         return None
     
     def _analyze_huggingface(self, texte: str) -> Dict[str, Any]:
-        """Fallback vers Hugging Face"""
-        full_prompt = f"System: {SYSTEM_PROMPT}\n\nUser: {user_prompt_template.format(cahier_des_charges=texte)}"
+        """Fallback vers Hugging Face avec huggingface_hub"""
         
-        payload = {
-            "inputs": full_prompt,
-            "parameters": {
-                "max_new_tokens": 2000,
-                "temperature": 0.1,
-                "return_full_text": False
-            }
-        }
+        if not HF_AVAILABLE:
+            return self._analyse_regles(texte)
+        
+        full_prompt = f"""{SYSTEM_PROMPT}
+
+Analyse ce cahier des charges et détecte tous les problèmes:
+
+---
+
+{texte}
+
+---
+
+Réponds en JSON strictement."""
         
         try:
-            response = requests.post(
-                HF_API_URL,
-                headers=self.headers,
-                json=payload,
-                timeout=120
+            client = InferenceClient(
+                "meta-llama/Llama-3.2-1B-Instruct",
+                token=self.api_token
             )
             
-            if response.status_code == 200:
-                result = response.json()
-                if isinstance(result, list) and len(result) > 0:
-                    texte_reponse = result[0].get("generated_text", "")
-                    return self._parser_reponse(texte_reponse)
+            response = client.chat_completion(
+                messages=[{"role": "user", "content": full_prompt}],
+                max_tokens=2000,
+                temperature=0.1
+            )
+            
+            texte_reponse = response.choices[0].message.content
+            return self._parser_reponse(texte_reponse)
+            
         except Exception as e:
             pass
         
@@ -305,9 +323,9 @@ class CahierDesChargesAnalyzer:
         }
 
 
-def analyser_cahier(texte: str, api_token: Optional[str] = None) -> Dict[str, Any]:
+def analyser_cahier(texte: str, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False) -> Dict[str, Any]:
     """Fonction principale d'analyse"""
-    analyzer = CahierDesChargesAnalyzer(api_token)
+    analyzer = CahierDesChargesAnalyzer(api_token, use_ollama, use_huggingface)
     return analyzer.analyze(texte)
 
 
