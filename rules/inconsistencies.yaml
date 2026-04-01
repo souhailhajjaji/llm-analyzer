@@ -1,0 +1,90 @@
+version: "1.0"
+category: "inconsistencies"
+description: "Contradictions et incohérences fréquentes dans les cahier des charges"
+
+patterns:
+  - id: "IC001"
+    name: "Contradiction fonctionnelle"
+    description: "Deux exigences qui se contredisent"
+    indicators:
+      - "d'une part"
+      - "d'autre part"
+      - "mais"
+      - "cependant"
+      - "toutefois"
+    severity: "high"
+    recommendation: "Clarifier les exigences contradictoires"
+
+  - id: "IC002"
+    name: "Exigence impossible"
+    description: "Exigence techniquement ou logiquement impossible"
+    indicators:
+      - "tout le temps"
+      - "100%"
+      - "jamais"
+      - "sans exception"
+    severity: "critical"
+    recommendation: "Revoir la faisabilité de l'exigence"
+
+  - id: "IC003"
+    name: "Cercle vicieux"
+    description: "Définition circulaire sans point d'entrée"
+    indicators:
+      - "défini comme"
+      - "c'est-à-dire"
+      - "représente"
+    severity: "medium"
+    recommendation: "Définir des termes primitifs non cycliques"
+
+  - id: "IC004"
+    name: "Incohérence de format"
+    description: "Formats de données incohérents"
+    indicators:
+      - "format"
+      - "type de données"
+      - "unité"
+    severity: "low"
+    recommendation: "Standardiser les formats de données"
+
+  - id: "IC005"
+    name: "Exigence vague"
+    description: "Exigence trop floue pour être testée"
+    indicators:
+      - "si nécessaire"
+      - "le cas échéant"
+      - "approximativement"
+      - "environ"
+    severity: "medium"
+    recommendation: "Rendre les exigences mesurables et testables"
+
+  - id: "IC006"
+    name: "Dépendance circulaire"
+    description: "Modules dépendant les uns des autres circulairement"
+    indicators:
+      - "dépend de"
+      - "utilise"
+      - "appelle"
+    severity: "medium"
+    recommendation: "Refactoriser pour éliminer les dépendances circulaires"
+
+  - id: "IC007"
+    name: "Incohérence d'échelle"
+    description: "Unités ou échelles incohérentes"
+    indicators:
+      - "milliseconde"
+      - "seconde"
+      - "minute"
+      - "heure"
+      - "jour"
+    severity: "low"
+    recommendation: "Standardiser les unités et échelles de temps"
+
+  - id: "IC008"
+    name: "Exigence redondante"
+    description: "Exigences identiques ou完全ement similaires répétées"
+    indicators:
+      - "comme mentionné"
+      - "voir section"
+      - "référer à"
+    severity: "low"
+    recommendation: "Consolider les exigences redondantes"

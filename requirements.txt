@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-docx
+pydantic
+pydantic-settings
+pyyaml
+httpx
+python-multipart
+streamlit>=1.30.0
+requests>=2.31.0

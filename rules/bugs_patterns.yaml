@@ -1,0 +1,83 @@
+version: "1.0"
+category: "bugs_patterns"
+description: "Anti-patterns de bugs courants dans les cahier des charges"
+
+patterns:
+  - id: "BP001"
+    name: "Conditions de course"
+    description: "Spécification permettant des executions concurrentes sans synchronisation"
+    indicators:
+      - "accès simultané"
+      - "concurrence"
+      - "thread"
+      - "parallèle"
+      - "async"
+    severity: "high"
+    recommendation: "Définir clairement les mécanismes de synchronisation et les contraintes de concurrence"
+
+  - id: "BP002"
+    name: "Gestion d'erreurs manquante"
+    description: "Cas d'erreur non traités dans les spécifications"
+    indicators:
+      - "en cas d'erreur"
+      - "si erreur"
+      - "exception"
+      - "gestion d'erreur"
+      - "traiter l'erreur"
+    severity: "medium"
+    recommendation: "Documenter tous les cas d'erreur possibles et leur gestion"
+
+  - id: "BP003"
+    name: "Limites non définies"
+    description: "Bornes et limites non spécifiées"
+    indicators:
+      - "nombre maximum"
+      - "taille maximale"
+      - "limite"
+      - "borne"
+      - "jusqu'à"
+    severity: "medium"
+    recommendation: "Définir explicitement toutes les limites et contraintes"
+
+  - id: "BP004"
+    name: "État initial non défini"
+    description: "Point de départ ou état initial non décrit"
+    indicators:
+      - "au démarrage"
+      - "initialement"
+      - "état initial"
+      - "au lancement"
+    severity: "medium"
+    recommendation: "Décrire précisément l'état initial du système"
+
+  - id: "BP005"
+    name: "Dépendances implicites"
+    description: "Hypothèses non exprimées sur l'environnement ou les données"
+    indicators:
+      - "suppose que"
+      - "implicitement"
+      - "bien sûr"
+      - "évidemment"
+    severity: "high"
+    recommendation: "Expliciter toutes les dépendances et hypothèses"
+
+  - id: "BP006"
+    name: "Transactions non atomic"
+    description: "Opérations nécessitant atomicité non spécifiées"
+    indicators:
+      - "transaction"
+      - "atomique"
+      - "tout ou rien"
+      - "rollback"
+    severity: "high"
+    recommendation: "Définir les propriétés ACID des transactions"
+
+  - id: "BP007"
+    name: "Cas de compétition (Race Conditions)"
+    description: "Scénarios où l'ordre des opérations affecte le résultat"
+    indicators:
+      - "en même temps"
+      - "simultanément"
+      - "ordre d'exécution"
+    severity: "high"
+    recommendation: "Spécifier l'ordre précis des opérations critiques"

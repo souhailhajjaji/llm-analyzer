@@ -1,0 +1,21 @@
+INFO:     Started server process [29196]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Skipping import of cpp extensions due to incompatible torch version 2.11.0+cpu for torchao version 0.16.0             Please see https://github.com/pytorch/ao/issues/2919 for more info
+Initializing OllamaAnalyzer...
+Failed to initialize OllamaAnalyzer: Ollama is not available
+Loading Qwen/Qwen2.5-0.5B-Instruct from cache...
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:   1%|          | 2/290 [00:00<00:18, 15.75it/s]Loading weights:  20%|█▉        | 57/290 [00:00<00:01, 194.98it/s]Loading weights:  26%|██▌       | 74/290 [00:00<00:03, 68.30it/s] Loading weights:  29%|██▉       | 85/290 [00:01<00:03, 53.94it/s]Loading weights:  32%|███▏      | 93/290 [00:02<00:06, 31.71it/s]Loading weights:  34%|███▍      | 99/290 [00:02<00:05, 32.45it/s]Loading weights:  41%|████      | 118/290 [00:02<00:03, 46.31it/s]Loading weights:  43%|████▎     | 125/290 [00:02<00:03, 44.39it/s]Loading weights:  53%|█████▎    | 154/290 [00:02<00:02, 67.11it/s]Loading weights:  66%|██████▌   | 190/290 [00:02<00:00, 105.94it/s]Loading weights:  85%|████████▌ | 247/290 [00:03<00:00, 179.25it/s]Loading weights: 100%|██████████| 290/290 [00:03<00:00, 95.44it/s] 
+Qwen model loaded successfully!
+Qwen: Validation des résultats Rule-Based...
+Qwen: Recherche des problèmes manqués...
+Qwen: 0 nouveaux problèmes découverts
+INFO:     127.0.0.1:60084 - "POST /api/analyze/hybrid HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47858 - "POST /api/analyze/text HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54162 - "POST /api/analyze/hybrid HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [29196]

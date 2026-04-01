@@ -1,0 +1,11 @@
+title: Cahier Charges Analyzer
+emoji: 📋
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: 1.30.0
+app_file: app.py
+requirements:
+  - streamlit>=1.30.0
+  - requests>=2.31.0
+pinned: false
