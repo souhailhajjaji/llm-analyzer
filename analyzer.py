@@ -205,27 +205,27 @@ class CahierDesChargesAnalyzer:
         problemes = []
         
         regles = [
-            ("en clair", "SECURITE", "CRITIQUE", "Mots de passe stockés en clair", "Hasher les mots de passe avec bcrypt/argon2"),
+            ("en clair|base64", "SECURITE", "CRITIQUE", "Mots de passe stockés de manière non sécurisée", "Hasher les mots de passe avec bcrypt/argon2"),
             ("stockées en clair", "SECURITE", "CRITIQUE", "Données sensibles stockées en clair", "Chiffrer les données sensibles"),
             ("sans authentification", "SECURITE", "CRITIQUE", "API sans authentification", "Implémenter une authentification JWT/OAuth"),
             ("pas de validation", "SECURITE", "CRITIQUE", "Aucune validation des entrées", "Valider toutes les entrées utilisateur"),
-            ("sessions.*jamais", "SECURITE", "ELEVEE", "Sessions sans expiration", "Implémenter une expiration de session"),
+            ("sessions.*(jamais|infini)|n'expirent jamais|n'expire jamais", "SECURITE", "ELEVEE", "Sessions sans expiration", "Implémenter une expiration de session"),
             ("prix.*côté client", "SECURITE", "CRITIQUE", "Prix calculé côté client - fraude possible", "Calculer les prix côté serveur uniquement"),
             ("modifier le prix", "SECURITE", "CRITIQUE", "Prix modifiable par le client", "Le prix doit être validé côté serveur"),
-            ("pas de vérification de rôle", "SECURITE", "ELEVEE", "Pas de vérification de rôle admin", "Vérifier les permissions à chaque requête admin"),
-            ("comptes des autres", "SECURITE", "CRITIQUE", "Modification des comptes d'autrui", "Vérifier que l'utilisateur modifie son propre compte"),
+            ("pas de vérification de rôle|vérification de rôle", "SECURITE", "ELEVEE", "Pas de vérification de rôle admin", "Vérifier les permissions à chaque requête admin"),
+            ("comptes des autres|autrui", "SECURITE", "CRITIQUE", "Modification des comptes d'autrui", "Vérifier que l'utilisateur modifie son propre compte"),
             ("messages détaillés", "SECURITE", "MOYENNE", "Messages d'erreur détaillés (information leakage)", "Utiliser des messages génériques"),
-            ("pas de limite.*tentatives", "SECURITE", "ELEVEE", "Pas de limite de tentatives de connexion", "Implémenter un verrouillage après N tentatives"),
-            ("SQL Injection", "EDGE_CASE", "ELEVEE", "Risque d'injection SQL", "Utiliser des requêtes paramétrées"),
-            ("XSS", "EDGE_CASE", "ELEVEE", "Risque XSS", "Échapper les entrées/sorties"),
-            ("prix négatif", "EDGE_CASE", "MOYENNE", "Prix négatif non géré", "Valider les valeurs positives"),
+            ("pas de limite.*tentatives|pas de limite de tentatives", "SECURITE", "ELEVEE", "Pas de limite de tentatives de connexion", "Implémenter un verrouillage après N tentatives"),
+            ("SQL Injection|sql injection", "EDGE_CASE", "ELEVEE", "Risque d'injection SQL", "Utiliser des requêtes paramétrées"),
+            ("XSS|xss", "EDGE_CASE", "ELEVEE", "Risque XSS", "Échapper les entrées/sorties"),
+            ("prix négatif|prix.*négatif", "EDGE_CASE", "MOYENNE", "Prix négatif non géré", "Valider les valeurs positives"),
             ("IDOR", "EDGE_CASE", "ELEVEE", "Risque IDOR", "Vérifier les autorisations sur les ressources"),
             ("n'importe quelle longueur", "AMBIGUITE", "FAIBLE", "Mot de passe sans longueur minimale", "Exiger minimum 8 caractères"),
-            ("pas besoin d'être validé", "AMBIGUITE", "MOYENNE", "Email non validé", "Valider l'email par lien de confirmation"),
-            ("logs de sécurité", "SECURITE", "MOYENNE", "Pas de logs de sécurité", "Implémenter une journalisation"),
+            ("pas besoin d'être validé|pas.*validé", "AMBIGUITE", "MOYENNE", "Email non validé", "Valider l'email par lien de confirmation"),
+            ("logs de sécurité|logs.*sécurité", "SECURITE", "MOYENNE", "Pas de logs de sécurité", "Implémenter une journalisation"),
             ("tokens.*pas.*sécurisés", "SECURITE", "ELEVEE", "Tokens non sécurisés", "Utiliser des tokens JWT signés avec expiration"),
             ("plusieurs rôles", "CONTRADICTION", "MOYENNE", "Contradiction sur les rôles", "Clarifier: un utilisateur peut avoir plusieurs rôles ou un seul"),
-            ("un seul rôle", "CONTRADICTION", "MOYENNE", "Contradiction sur les rôles", "Clarifier: un utilisateur peut avoir plusieurs rôles ou un seul"),
+            ("rgpd|revendues à des partenaires|indéfiniment", "LEGAL", "ELEVEE", "Problème de conformité RGPD", "Respecter le RGPD: droit à l'effacement, pas de revente de données"),
         ]
         
         texte_lower = texte.lower()
