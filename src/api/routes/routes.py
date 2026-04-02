@@ -9,6 +9,7 @@ from src.services.validator import Validator
 from src.services.report_generator import ReportGenerator
 from src.services.rule_analyzer import analyze_with_rules
 from src.services.hybrid_analyzer import analyze_hybrid
+from analyzer import analyser_cahier
 
 router = APIRouter()
 
@@ -17,6 +18,7 @@ ANALYSIS_STORE = {}
 class AnalyzeRequest(BaseModel):
     text: str
     enable_llm: bool = True
+    analyse_avancee: bool = False
 
 class AnalyzeResponse(BaseModel):
     id: str
@@ -114,26 +116,23 @@ async def analyze_text(request: Request, analyze_request: AnalyzeRequest):
     }
     
     try:
-        result = analyze_with_rules(analyze_request.text)
-        
-        validator = Validator()
-        validated = validator.validate_analysis_result(result)
-        
-        validated.processing_time_ms = int((time.time() - ANALYSIS_STORE[analysis_id]["started_at"]) * 1000)
-        
-        report_gen = ReportGenerator()
-        report = report_gen.generate_json_report(validated, filename="text_input")
+        result = analyser_cahier(
+            analyze_request.text,
+            use_huggingface=False,
+            analyse_avancee=analyze_request.analyse_avancee
+        )
         
         ANALYSIS_STORE[analysis_id] = {
             "status": "completed",
-            "result": report,
+            "result": result,
             "completed_at": time.time(),
         }
 
     except Exception as e:
+        import traceback
         ANALYSIS_STORE[analysis_id] = {
             "status": "failed",
-            "error": str(e),
+            "error": str(e) + "\n" + traceback.format_exc(),
             "failed_at": time.time(),
         }
     

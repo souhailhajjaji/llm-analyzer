@@ -5,7 +5,13 @@ Déployable gratuitement sur Hugging Face Spaces
 
 import streamlit as st
 import json
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from analyzer import analyser_cahier
+
+load_dotenv(Path(__file__).parent / ".env")
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 st.set_page_config(
     page_title="Analyseur de Cahier des Charges",
@@ -209,7 +215,8 @@ def main():
     
     if analyze_btn and texte:
         with st.spinner("Analyse en cours..."):
-            result = analyser_cahier(texte, api_token if api_token else None, use_huggingface=use_llm)
+            token = api_token if api_token else HF_TOKEN
+            result = analyser_cahier(texte, token if token else None, use_huggingface=use_llm)
             
             afficher_problemes(result)
             afficher_extraction(result)

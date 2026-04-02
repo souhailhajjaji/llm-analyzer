@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     DEBUG: bool = False
 
+    HF_TOKEN: Optional[str] = None
+
     USE_UNSLOTH: bool = False
     USE_HUGGINGFACE: bool = True
     HF_MODEL_NAME: str = "HuggingFaceTB/SmolLM2-360M-Instruct"
@@ -32,6 +34,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 settings = Settings()

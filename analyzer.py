@@ -15,70 +15,34 @@ except ImportError:
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-SYSTEM_PROMPT = """Tu es un expert en analyse de cahier des charges logiciels.
-Ton rôle est de détecter et classifier tous les problèmes dans un cahier des charges.
+SYSTEM_PROMPT = """Tu es un expert en analyse de cahier des charges de sécurité informatique.
 
-## Catégories de problèmes à détecter:
+DÉTECTE UNIQUEMENT LES PROBLÈMES, PAS LES FONCTIONNALITÉS!
 
-### 1. CONTRADICTIONS
-- Deux exigences qui se contredisent mutuellement
-- Exemple: "Le mot de passe doit contenir au moins 8 caractères" ET "Le mot de passe peut contenir moins de 8 caractères"
+Catégories de PROBLÈMES (pas de fonctionnalités):
+- SECURITY: mots de passe en clair, API sans auth, sessions infinies, pas de validation
+- CONTRADICTION: exigences qui se contredisent
+- LEGAL: RGPD non respecté, données vendues, pas de droit effacement
+- AMBIGUITE: exigences floues
+- EDGE_CASE: cas limites non gérés
 
-### 2. PROBLÈMES DE SÉCURITÉ
-- Stockage de mots de passe en clair
-- Absence de validation des entrées
-- Sessions qui n'expirent jamais
-- API sans authentification
-- Permissions trop larges
+Pour chaque problème, indique:
+- categorie: SECURITY, CONTRADICTION, LEGAL, AMBIGUITE ou EDGE_CASE
+- severite: CRITIQUE (pour sécurité), ELEVEE, MOYENNE ou FAIBLE
+- titre: description courte du problème
+- description: explication détaillée
+- recommendation: solution recommandée
 
-### 3. PROBLÈMES RGPD/LÉGAUX
-- Conservation de données après suppression (sans raison d'audit claire)
-- Absence de mention de conformité légale
+NE mets PAS les fonctionnalités dans "problemes"! Elles vont dans "extraction".
 
-### 4. AMBIGUÏTÉS
-- Exigences floues ou imprécises
-- Utilisation de termes vagues ("rapidement", "sécurité", etc.)
-
-### 5. EDGE CASES MANQUANTS
-- Gestion des cas limites non traitée
-- Valeurs vides, null, limites
-
-## Format de réponse obligatoire (JSON):
-
-```json
+Réponds en JSON:
 {
-  "resume": {
-    "total_problemes": 10,
-    "critiques": 3,
-    "eleves": 4,
-    "moyens": 3,
-    "faibles": 0
-  },
-  "problemes": [
-    {
-      "id": 1,
-      "categorie": "SECURITE|CONTRADICTION|AMBIGUITE|LEGAL|EDGE_CASE",
-      "severite": "CRITIQUE|ELEVEE|MOYENNE|FAIBLE",
-      "titre": "Titre court du problème",
-      "description": "Description détaillée",
-      "localisation": "Section où se trouve le problème",
-      "recommendation": "Solution recommandée"
-    }
-  ],
-  "extraction": {
-    "functionalites": ["liste des fonctionnalités identifiées"],
-    "acteurs": ["liste des acteurs"],
-    "contraintes": ["liste des contraintes"],
-    "interfaces": ["liste des interfaces"],
-    "donnees": ["liste des données manipulées"]
-  }
-}
-```
+  "resume": {"total_problemes": N, "critiques": N, "eleves": N, "moyens": N, "faibles": N},
+  "problemes": [{"categorie": "...", "severite": "...", "titre": "...", "description": "...", "recommendation": "..."}],
+  "extraction": {"functionalites": [], "acteurs": [], "contraintes": [], "interfaces": [], "donnees": []}
+}"""
 
-Réponds STRICTEMENT en JSON valide. Pas de texte avant ou après.
-"""
-
-user_prompt_template = """Analyse ce cahier des charges et détecte tous les problèmes:
+user_prompt_template = """Analyse ce cahier des charges et détecte les PROBLÈMES (sécurité, contradictions, RGPD, ambiguïtés):
 
 ---
 
@@ -86,7 +50,7 @@ user_prompt_template = """Analyse ce cahier des charges et détecte tous les pro
 
 ---
 
-Réponds en JSON strictement. """
+列出 JSON. NE PAS inclure les fonctionnalités comme des problèmes!"""
 
 
 class CahierDesChargesAnalyzer:
@@ -173,29 +137,48 @@ Réponds en JSON strictement."""
             response = client.chat_completion(
                 messages=[{"role": "user", "content": full_prompt}],
                 max_tokens=2000,
-                temperature=0.1
+                temperature=0.0
             )
             
             texte_reponse = response.choices[0].message.content
             return self._parser_reponse(texte_reponse)
             
         except Exception as e:
-            pass
+            print(f"HF Error: {e}")
         
         return self._analyse_regles(texte)
     
     def _parser_reponse(self, texte: str) -> Dict[str, Any]:
         """Parse la réponse JSON du modèle"""
+        if not texte:
+            return self._erreur("Réponse vide")
+        
         try:
             debut = texte.find("{")
             fin = texte.rfind("}") + 1
             if debut != -1 and fin != 0:
                 json_str = texte[debut:fin]
-                return json.loads(json_str)
-        except json.JSONDecodeError:
-            pass
+                result = json.loads(json_str)
+                
+                # Valider la structure
+                if "resume" in result and "problemes" in result:
+                    # Compter les sévérités si pas fait
+                    if result["resume"].get("total_problemes", 0) == 0:
+                        severites = {"CRITIQUE": 0, "ELEVEE": 0, "MOYENNE": 0, "FAIBLE": 0}
+                        for p in result.get("problemes", []):
+                            sev = p.get("severite", "MOYENNE")
+                            if sev in severites:
+                                severites[sev] += 1
+                        result["resume"]["total_problemes"] = len(result.get("problemes", []))
+                        result["resume"]["critiques"] = severites["CRITIQUE"]
+                        result["resume"]["eleves"] = severites["ELEVEE"]
+                        result["resume"]["moyens"] = severites["MOYENNE"]
+                        result["resume"]["faibles"] = severites["FAIBLE"]
+                    return result
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Parser error: {e}")
         
-        return self._erreur("Impossible de parser la réponse")
+        return self._analyse_regles(texte)
     
     def _erreur(self, message: str) -> Dict[str, Any]:
         return {
@@ -321,11 +304,216 @@ Réponds en JSON strictement."""
             "interfaces": [],
             "donnees": []
         }
+    
+    def _detecter_contradictions(self, texte: str) -> List[Dict[str, Any]]:
+        """Détection de contradictions sémantiques"""
+        contradictions = []
+        
+        patterns_contradictoires = [
+            (["peut avoir plusieurs rôles", "plusieurs rôles"], ["un seul rôle", "un seul role"], "Contradiction sur les rôles: un utilisateur peut avoir plusieurs rôles mais aussi un seul rôle"),
+            (["pas de limite de tentatives", "pas de limite"], ["verrouillage après", "verrouillage"], "Contradiction: pas de limite de tentatives mais verrouillage prévu"),
+            (["tout le monde peut", "tous peuvent"], ["admin uniquement", "seul admin"], "Contradiction: accès pour tous mais restrictions admin"),
+            (["modifiable par le client", "client modifie"], ["côté serveur", "serveur uniquement"], "Contradiction: prix modifiable par client mais calculé serveur"),
+            (["données conservées", "conservées"], ["effacement", "supprimées"], "Contradiction: données conservées pour audit mais droit à l'effacement"),
+            (["accessible à tous", "api ouverte"], ["authentification", "protégé"], "Contradiction: API ouverte mais authentification requise"),
+        ]
+        
+        texte_lower = texte.lower()
+        
+        for pattern_pos, pattern_neg, description in patterns_contradictoires:
+            pos_found = any(p in texte_lower for p in pattern_pos)
+            neg_found = any(p in texte_lower for p in pattern_neg)
+            
+            if pos_found and neg_found:
+                contradictions.append({
+                    "id": len(contradictions) + 1,
+                    "categorie": "CONTRADICTION",
+                    "severite": "ELEVEE",
+                    "titre": "Contradiction détectée",
+                    "description": description,
+                    "localisation": "Analyse sémantique",
+                    "recommendation": "Clarifier l'exigence contradictoire"
+                })
+        
+        return contradictions
+    
+    def _analyser_completude(self, texte: str) -> Dict[str, Any]:
+        """Analyse la complétude du cahier des charges"""
+        sections_attendues = {
+            "description": ["description", "présentation", "contexte"],
+            "objectifs": ["objectifs", "but", "finalité"],
+            "fonctionnalites": ["fonctionnalité", "exigence", "feature"],
+            "acteurs": ["utilisateur", "acteur", "rôle", "personne"],
+            "contraintes": ["contrainte", "limitation", "prérequis"],
+            "securite": ["sécurité", "authentification", "accès"],
+            "technique": ["technique", "technologie", "stack", "architecture"],
+            "delai": ["délai", "livrable", "échéance"]
+        }
+        
+        texte_lower = texte.lower()
+        sections_trouvees = {}
+        
+        for section, keywords in sections_attendues.items():
+            sections_trouvees[section] = any(kw in texte_lower for kw in keywords)
+        
+        total = len(sections_attendues)
+        presente = sum(1 for v in sections_trouvees.values() if v)
+        score = (presente / total) * 100
+        
+        problemes = []
+        
+        if score < 50:
+            problemes.append({
+                "id": 1,
+                "categorie": "AMBIGUITE",
+                "severite": "ELEVEE",
+                "titre": "Cahier des charges incomplet",
+                "description": f" seulement {presente}/{total} sections essentielles présentes",
+                "localisation": "Analyse de complétude",
+                "recommendation": "Ajouter les sections manquantes: " + ", ".join([s for s, ok in sections_trouvees.items() if not ok])
+            })
+        
+        for section, presente in sections_trouvees.items():
+            if not presente:
+                problemes.append({
+                    "id": len(problemes) + 1,
+                    "categorie": "AMBIGUITE",
+                    "severite": "FAIBLE",
+                    "titre": f"Section '{section}' manquante",
+                    "description": f"La section '{section}' n'a pas été détectée",
+                    "localisation": "Analyse de complétude",
+                    "recommendation": f"Ajouter une section '{section}'"
+                })
+        
+        return {
+            "score_completude": score,
+            "sections": sections_trouvees,
+            "problemes": problemes
+        }
+    
+    def _analyser_qualite(self, texte: str) -> Dict[str, Any]:
+        """Analyse la qualité globale du document"""
+        lignes = [l.strip() for l in texte.split("\n") if l.strip()]
+        
+        score = 100
+        problemes = []
+        
+        if len(lignes) < 10:
+            score -= 20
+            problemes.append({"type": "longueur", "severite": "ELEVEE", "message": "Document trop court"})
+        
+        mots_techniques = ["api", "jwt", "oauth", "sql", "chiffrement", "hash", "token", "session", "rôle", "permission"]
+        texte_lower = texte.lower()
+        technique_count = sum(1 for mot in mots_techniques if mot in texte_lower)
+        
+        if technique_count < 3:
+            score -= 15
+            problemes.append({"type": "technique", "severite": "MOYENNE", "message": "Pas assez de détails techniques"})
+        
+        if "?" in texte:
+            score -= 10
+            problemes.append({"type": "ambiguite", "severite": "MOYENNE", "message": "Présence de questions non résolues"})
+        
+        return {
+            "score_qualite": max(0, score),
+            "nb_lignes": len(lignes),
+            "mots_techniques": technique_count,
+            "problemes": problemes
+        }
+    
+    def _valider_references_croisees(self, texte: str, extractions: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+        """Valide les références entre sections"""
+        problemes = []
+        
+        actors = extractions.get("acteurs", [])
+        functionalites = extractions.get("functionalites", [])
+        
+        if actors and not functionalites:
+            problemes.append({
+                "id": 1,
+                "categorie": "AMBIGUITE",
+                "severite": "MOYENNE",
+                "titre": "Acteurs définis sans fonctionnalités",
+                "description": "Des acteurs sont mentionnés mais aucune fonctionnalité n'est associée",
+                "localisation": "Validation croisée",
+                "recommendation": "Associer des fonctionnalités à chaque acteur"
+            })
+        
+        texte_lower = texte.lower()
+        
+        if "données" in texte_lower or "données" in texte_lower:
+            if "sécurité" not in texte_lower and "chiffrement" not in texte_lower:
+                problemes.append({
+                    "id": len(problemes) + 1,
+                    "categorie": "SECURITE",
+                    "severite": "ELEVEE",
+                    "titre": "Données mentionnées sans sécurité",
+                    "description": "Le document mentionne des données mais pas leur protection",
+                    "localisation": "Validation croisée",
+                    "recommendation": "Ajouter des exigences de sécurité pour les données"
+                })
+        
+        if "paiement" in texte_lower or "carte" in texte_lower:
+            if "pci" not in texte_lower and "conformité" not in texte_lower and "certification" not in texte_lower:
+                problemes.append({
+                    "id": len(problemes) + 1,
+                    "categorie": "LEGAL",
+                    "severite": "ELEVEE",
+                    "titre": "Paiement sans conformité PCI",
+                    "description": "Le document mentionne des paiements sans conformité PCI DSS",
+                    "localisation": "Validation croisée",
+                    "recommendation": "Ajouter les exigences de conformité PCI DSS"
+                })
+        
+        return problemes
+    
+    def analyser_avance(self, texte: str) -> Dict[str, Any]:
+        """Analyse avancée complète avec toutes les méthodes"""
+        contradictions = self._detecter_contradictions(texte)
+        completude = self._analyser_completude(texte)
+        qualite = self._analyser_qualite(texte)
+        extractions = self._extraire_elements(texte)
+        references = self._valider_references_croisees(texte, extractions)
+        
+        all_problemes = []
+        
+        all_problemes.extend(contradictions)
+        all_problemes.extend(completude.get("problemes", []))
+        all_problemes.extend(references)
+        
+        return {
+            "resume": {
+                "total_problemes": len(all_problemes),
+                "contradictions": len(contradictions),
+                "completude_score": completude.get("score_completude", 0),
+                "qualite_score": qualite.get("score_qualite", 0),
+                "critiques": len([p for p in all_problemes if p.get("severite") == "CRITIQUE"]),
+                "eleves": len([p for p in all_problemes if p.get("severite") == "ELEVEE"]),
+                "moyennes": len([p for p in all_problemes if p.get("severite") == "MOYENNE"]),
+                "faibles": len([p for p in all_problemes if p.get("severite") == "FAIBLE"]),
+            },
+            "problemes": all_problemes,
+            "extraction": {
+                **extractions,
+                "completude": completude,
+                "qualite": qualite
+            },
+            "analyse_avancee": {
+                "contradictions": contradictions,
+                "completude": completude,
+                "qualite": qualite,
+                "references": references
+            }
+        }
 
 
-def analyser_cahier(texte: str, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False) -> Dict[str, Any]:
+def analyser_cahier(texte: str, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False, analyse_avancee: bool = False) -> Dict[str, Any]:
     """Fonction principale d'analyse"""
     analyzer = CahierDesChargesAnalyzer(api_token, use_ollama, use_huggingface)
+    
+    if analyse_avancee:
+        return analyzer.analyser_avance(texte)
+    
     return analyzer.analyze(texte)
 
 

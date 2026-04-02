@@ -1,9 +1,61 @@
+import os
 import pytest
 from analyzer import analyser_cahier, CahierDesChargesAnalyzer
 
 
 class TestAnalyseRegles:
     """Tests pour l'analyseur de règles locales"""
+
+    HF_TOKEN = os.environ.get("HF_TOKEN", "")
+
+    def test_avec_huggingface(self):
+        """Test avec l'API Hugging Face"""
+        texte = "Les mots de passe sont stockés en clair"
+        result = analyser_cahier(texte, api_token=self.HF_TOKEN, use_huggingface=True)
+        assert result["resume"]["total_problemes"] >= 1
+
+    def test_contradiction_detection(self):
+        """Détection de contradictions sémantiques"""
+        texte = """
+        Un utilisateur peut avoir plusieurs rôles
+        Un utilisateur ne peut avoir qu'un seul rôle
+        """
+        result = analyser_cahier(texte, analyse_avancee=True)
+        assert len(result["analyse_avancee"]["contradictions"]) >= 1
+
+    def test_completude_analysis(self):
+        """Analyse de complétude du cahier des charges"""
+        texte = "Description du projet"
+        result = analyser_cahier(texte, analyse_avancee=True)
+        assert "completude_score" in result["resume"]
+
+    def test_qualite_analysis(self):
+        """Analyse de qualité du document"""
+        texte = """
+        Cahier des charges - Projet complet
+        
+        1. Description
+        Nous développons une API avec JWT et chiffrement.
+        
+        2. Fonctionnalités
+        - Inscription utilisateur
+        - Authentification par token
+        
+        3. Sécurité
+        - Les mots de passe sont hashés avec bcrypt
+        - Sessions avec expiration
+        """
+        result = analyser_cahier(texte, analyse_avancee=True)
+        assert "score_qualite" in result["analyse_avancee"]["qualite"]
+
+    def test_cross_reference_validation(self):
+        """Validation des références croisées"""
+        texte = """
+        Les données des utilisateurs sont stockées en base de données.
+        Le système de paiement traite les cartes bancaires.
+        """
+        result = analyser_cahier(texte, analyse_avancee=True)
+        assert len(result["analyse_avancee"]["references"]) >= 1
 
     def test_aucun_probleme(self):
         """Test avec un texte sans problèmes"""

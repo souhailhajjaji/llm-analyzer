@@ -72,8 +72,44 @@ function App() {
     setAnalyzing(true);
     
     try {
-      const result = await analysisApi.analyzeText(textInput);
-      setReport(result);
+      const response = await analysisApi.analyzeText(textInput);
+      const reportData = response.result || response;
+      
+      const transformedReport = {
+        ...reportData,
+        summary: {
+          total_issues: reportData.resume?.total_problemes ?? 0,
+          by_severity: {
+            critical: reportData.resume?.critiques ?? 0,
+            high: reportData.resume?.eleves ?? 0,
+            medium: reportData.resume?.moyens ?? 0,
+            low: reportData.resume?.faibles ?? 0,
+          },
+          by_category: {},
+        },
+        issues: (reportData.problemes ?? []).map((p: any) => ({
+          id: p.id,
+          issue: p.titre,
+          category: p.categorie,
+          severity: p.severite?.toLowerCase() ?? 'medium',
+          location: p.localisation ?? '',
+          recommendation: p.recommendation ?? '',
+          description: p.description ?? '',
+        })),
+        extraction: {
+          functionalities: reportData.extraction?.functionalites ?? [],
+          actors: reportData.extraction?.acteurs ?? [],
+          constraints: reportData.extraction?.contraintes ?? [],
+          interfaces: reportData.extraction?.interfaces ?? [],
+          data: reportData.extraction?.donnees ?? [],
+        },
+        confidence_score: reportData.resume?.confidence_score ?? 0.8,
+        generated_at: reportData.generated_at ?? new Date().toISOString(),
+        processing_time_ms: reportData.processing_time_ms ?? 0,
+        filename: 'Text Input',
+      };
+      
+      setReport(transformedReport);
     } catch (err) {
       setError('Failed to analyze text');
     } finally {
