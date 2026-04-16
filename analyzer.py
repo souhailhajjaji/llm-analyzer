@@ -1,6 +1,6 @@
 """
 Analyseur de Cahier des Charges
-Utilise Ollama (local) ou Hugging Face pour l'analyse
+Utilise Ollama (local) pour extraction des metadonnees uniquement
 """
 
 import json
@@ -15,83 +15,221 @@ except ImportError:
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-SYSTEM_PROMPT = """Tu es un expert en analyse de cahier des charges de sécurité informatique.
+EXTRACTION_SYSTEM_PROMPT = """Tu es un assistant expert en extraction d'informations de cahier des charges.
+Extrait uniquement les metadonnees du document. Ne detecte PAS les problemes de securite.
+Reponds uniquement en JSON."""
 
-DÉTECTE UNIQUEMENT LES PROBLÈMES, PAS LES FONCTIONNALITÉS!
-
-Catégories de PROBLÈMES (pas de fonctionnalités):
-- SECURITY: mots de passe en clair, API sans auth, sessions infinies, pas de validation
-- CONTRADICTION: exigences qui se contredisent
-- LEGAL: RGPD non respecté, données vendues, pas de droit effacement
-- AMBIGUITE: exigences floues
-- EDGE_CASE: cas limites non gérés
-
-Pour chaque problème, indique:
-- categorie: SECURITY, CONTRADICTION, LEGAL, AMBIGUITE ou EDGE_CASE
-- severite: CRITIQUE (pour sécurité), ELEVEE, MOYENNE ou FAIBLE
-- titre: description courte du problème
-- description: explication détaillée
-- recommendation: solution recommandée
-
-NE mets PAS les fonctionnalités dans "problemes"! Elles vont dans "extraction".
-
-Réponds en JSON:
-{
-  "resume": {"total_problemes": N, "critiques": N, "eleves": N, "moyens": N, "faibles": N},
-  "problemes": [{"categorie": "...", "severite": "...", "titre": "...", "description": "...", "recommendation": "..."}],
-  "extraction": {"functionalites": [], "acteurs": [], "contraintes": [], "interfaces": [], "donnees": []}
-}"""
-
-user_prompt_template = """Analyse ce cahier des charges et détecte les PROBLÈMES (sécurité, contradictions, RGPD, ambiguïtés):
-
----
+EXTRACTION_USER_PROMPT = """Extrait les informations de ce cahier des charges:
 
 {cahier_des_charges}
 
----
-
-列出 JSON. NE PAS inclure les fonctionnalités comme des problèmes!"""
+JSON:"""
 
 
 class CahierDesChargesAnalyzer:
-    def __init__(self, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False):
-        self.api_token = api_token  # Token sera configuré par l'utilisateur
+    def __init__(self, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False, use_groq: bool = False, groq_api_key: Optional[str] = None):
+        self.api_token = api_token
         self.use_ollama = use_ollama
         self.use_huggingface = use_huggingface
-        self.headers = {}
-        if self.api_token:
-            self.headers["Authorization"] = f"Bearer {self.api_token}"
-        self.headers["Content-Type"] = "application/json"
+        self.use_groq = use_groq
+        self.groq_api_key = groq_api_key
     
     def analyze(self, texte: str) -> Dict[str, Any]:
-        """Analyse le cahier des charges"""
+        """Analyse le cahier des charges - extraction uniquement"""
+        
+        if self.use_groq:
+            extraction = self._extraire_metadonnees_groq(texte)
+            if extraction:
+                return {
+                    "extraction": extraction,
+                    "problemes": [],
+                    "resume": {"total_problemes": 0, "critiques": 0, "eleves": 0, "moyens": 0, "faibles": 0}
+                }
         
         if self.use_ollama:
-            result = self._analyze_ollama(texte)
-            if result:
-                return result
+            extraction = self._extraire_metadonnees_ollama(texte)
+            if extraction:
+                return {
+                    "extraction": extraction,
+                    "problemes": [],
+                    "resume": {"total_problemes": 0, "critiques": 0, "eleves": 0, "moyens": 0, "faibles": 0}
+                }
         
         if self.use_huggingface:
-            result = self._analyze_huggingface(texte)
-            if result and result.get("problemes"):
-                return result
+            extraction = self._extraire_metadonnees_huggingface(texte)
+            if extraction:
+                return {
+                    "extraction": extraction,
+                    "problemes": [],
+                    "resume": {"total_problemes": 0, "critiques": 0, "eleves": 0, "moyens": 0, "faibles": 0}
+                }
         
-        return self._analyse_regles(texte)
+        # Fallback: extraction locale avec regex
+        extraction = self._extraire_elements_cps(texte)
+        if extraction:
+            problemes = self._analyser_cps_elements(texte)
+            severites = {"CRITIQUE": 0, "ELEVEE": 0, "MOYENNE": 0, "FAIBLE": 0}
+            for p in problemes:
+                severites[p["severite"]] += 1
+            return {
+                "extraction": extraction,
+                "problemes": problemes,
+                "resume": {
+                    "total_problemes": len(problemes),
+                    "critiques": severites["CRITIQUE"],
+                    "eleves": severites["ELEVEE"],
+                    "moyens": severites["MOYENNE"],
+                    "faibles": severites["FAIBLE"]
+                }
+            }
+        
+        return self._erreur("Extraction failed")
     
-    def _analyze_ollama(self, texte: str) -> Optional[Dict[str, Any]]:
-        """Analyse avec Ollama (local)"""
-        full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt_template.format(cahier_des_charges=texte)}"
+    def _extraire_metadonnees_ollama(self, texte: str) -> Optional[Dict[str, Any]]:
+        """Extrait les metadonnees avec Ollama"""
+        full_prompt = f"{EXTRACTION_SYSTEM_PROMPT}\n\n{EXTRACTION_USER_PROMPT.format(cahier_des_charges=texte)}"
+        
+        print(f"[DEBUG] Extraction Ollama - prompt length: {len(full_prompt)}")
         
         payload = {
             "model": "llama3.2",
             "prompt": full_prompt,
             "stream": False,
-            "format": "json",
             "options": {
                 "temperature": 0.1,
-                "num_predict": 2000
+                "num_predict": 4000
             }
         }
+        
+        try:
+            response = requests.post(
+                OLLAMA_URL,
+                json=payload,
+                timeout=180
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                texte_reponse = result.get("response", "")
+                if texte_reponse:
+                    return self._parser_extraction(texte_reponse)
+        except Exception as e:
+            print(f"Ollama extraction error: {e}")
+        
+        return None
+    
+    def _extraire_metadonnees_huggingface(self, texte: str) -> Optional[Dict[str, Any]]:
+        """Extrait les metadonnees avec Hugging Face"""
+        if not HF_AVAILABLE:
+            return None
+        
+        full_prompt = f"{EXTRACTION_SYSTEM_PROMPT}\n\n{EXTRACTION_USER_PROMPT.format(cahier_des_charges=texte)}"
+        
+        try:
+            client = InferenceClient(
+                "meta-llama/Llama-3.2-1B-Instruct",
+                token=self.api_token
+            )
+            
+            response = client.chat_completion(
+                messages=[{"role": "user", "content": full_prompt}],
+                max_tokens=2000,
+                temperature=0.0
+            )
+            
+            texte_reponse = response.choices[0].message.content
+            return self._parser_extraction(texte_reponse)
+            
+        except Exception as e:
+            print(f"HF extraction error: {e}")
+        
+        return None
+    
+    def _extraire_metadonnees_groq(self, texte: str) -> Optional[Dict[str, Any]]:
+        """Extrait les metadonnees avec Groq API"""
+        if not self.groq_api_key:
+            return None
+        
+        full_prompt = f"{EXTRACTION_SYSTEM_PROMPT}\n\n{EXTRACTION_USER_PROMPT.format(cahier_des_charges=texte)}"
+        
+        try:
+            import httpx
+            
+            response = httpx.Client(timeout=120).post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": full_prompt}
+                    ],
+                    "temperature": 0.3,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                texte_reponse = result["choices"][0]["message"]["content"]
+                if texte_reponse:
+                    return self._parser_extraction(texte_reponse)
+        except Exception as e:
+            print(f"Groq extraction error: {e}")
+        
+        return None
+    
+    def _parser_extraction(self, texte: str) -> Optional[Dict[str, Any]]:
+        """Parse la reponse JSON d'extraction"""
+        if not texte:
+            return None
+        
+        try:
+            debut = texte.find("{")
+            fin = texte.rfind("}") + 1
+            if debut != -1 and fin != 0:
+                json_str = texte[debut:fin]
+                result = json.loads(json_str)
+                
+                if "extraction" in result:
+                    return result["extraction"]
+                return result
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Parser extraction error: {e}")
+        
+        return None
+    
+    def _parser_reponse(self, texte: str) -> Dict[str, Any]:
+        """Parse la reponse JSON du modele (legacy)"""
+        if not texte:
+            return self._erreur("Reponse vide")
+        
+        try:
+            debut = texte.find("{")
+            fin = texte.rfind("}") + 1
+            if debut != -1 and fin != 0:
+                json_str = texte[debut:fin]
+                result = json.loads(json_str)
+                
+                if "resume" in result and "problemes" in result:
+                    if result["resume"].get("total_problemes", 0) == 0:
+                        severites = {"CRITIQUE": 0, "ELEVEE": 0, "MOYENNE": 0, "FAIBLE": 0}
+                        for p in result.get("problemes", []):
+                            sev = p.get("severite", "MOYENNE")
+                            if sev in severites:
+                                severites[sev] += 1
+                        result["resume"]["total_problemes"] = len(result.get("problemes", []))
+                        result["resume"]["critiques"] = severites["CRITIQUE"]
+                        result["resume"]["eleves"] = severites["ELEVEE"]
+                        result["resume"]["moyens"] = severites["MOYENNE"]
+                        result["resume"]["faibles"] = severites["FAIBLE"]
+                    return result
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Parser error: {e}")
+        
+        return self._analyse_regles(texte)
         
         try:
             response = requests.post(
@@ -129,6 +267,7 @@ Analyse ce cahier des charges et détecte tous les problèmes:
 Réponds en JSON strictement."""
         
         try:
+            print(f"[DEBUG] API Token: {self.api_token[:20] if self.api_token else 'None'}...")
             client = InferenceClient(
                 "meta-llama/Llama-3.2-1B-Instruct",
                 token=self.api_token
@@ -192,11 +331,10 @@ Réponds en JSON strictement."""
             },
             "problemes": [],
             "extraction": {
-                "functionalites": [],
-                "acteurs": [],
-                "contraintes": [],
-                "interfaces": [],
-                "donnees": []
+                "metadonnees": {"nom_client": None, "objet": None, "objectifs": [], "orientations_technologiques": []},
+                "contraintes_projet": {"date_limite_soumission": None, "budget": None, "caution_provisoire": None, "delai_execution": None},
+                "dossier_reponse": {"administratif": [], "technique": [], "financier": []},
+                "references": [], "exigences": [], "modalites_paiement": []
             }
         }
     
@@ -204,6 +342,10 @@ Réponds en JSON strictement."""
         """Analyse par règles locales (fallback sans LLM)"""
         probleme_id = 0
         problemes = []
+        
+        # Analy CPS - Analyse des éléments du cahier des charges
+        problemes.extend(self._analyser_cps_elements(texte))
+        probleme_id = len(problemes)
         
         regles = [
             ("en clair|base64", "SECURITE", "CRITIQUE", "Mots de passe stockés de manière non sécurisée", "Hasher les mots de passe avec bcrypt/argon2"),
@@ -254,7 +396,7 @@ Réponds en JSON strictement."""
                     "recommendation": recommendation
                 })
         
-        extraction = self._extraire_elements(texte)
+        extraction = self._extraire_elements_cps(texte)
         
         severites = {"CRITIQUE": 0, "ELEVEE": 0, "MOYENNE": 0, "FAIBLE": 0}
         for p in problemes:
@@ -271,6 +413,246 @@ Réponds en JSON strictement."""
             "problemes": problemes,
             "extraction": extraction
         }
+    
+    def _analyser_cps_elements(self, texte: str) -> List[Dict[str, Any]]:
+        """Analyse les éléments spécifiques du cahier des charges"""
+        import re
+        problemes = []
+        probleme_id = 0
+        
+        elements_cps = {
+            "Nom client": {
+                "patterns": [r"nom du client", r"client\s*:", r"société", r"raison sociale", r"entreprise\s*:", r"bénéficiaire", r"atlas digital", r"🏢"],
+                "categorie": "COMPLETUDE",
+                "severite": "ELEVEE",
+                "titre": "Nom client manquant",
+                "recommendation": "Ajouter le nom du client ou de l'entreprise"
+            },
+            "Objet": {
+                "patterns": [r"objet\s*:", r"objet du marché", r"objet du contrat", r"description du projet", r"contexte", r"présentation", r"📌"],
+                "categorie": "COMPLETUDE",
+                "severite": "CRITIQUE",
+                "titre": "Objet manquant",
+                "recommendation": "Définir clairement l'objet du marché"
+            },
+            "Objectifs du projet": {
+                "patterns": [r"objectifs?\s*:", r"but du projet", r"finalité", r"résultats attendus", r"objectifs.*projet", r"🎯"],
+                "categorie": "COMPLETUDE",
+                "severite": "ELEVEE",
+                "titre": "Objectifs du projet non définis",
+                "recommendation": "Détailler les objectifs du projet"
+            },
+            "Orientations technologiques": {
+                "patterns": [r"technolog", r"stack", r"architecture", r"environ(nement)?\s*(technique|dev|prod)", r"outils", r"langage", r"framework", r"backend", r"frontend", r"base de données", r"🧭"],
+                "categorie": "QUALITE",
+                "severite": "MOYENNE",
+                "titre": "Orientations technologiques non définies",
+                "recommendation": "Préciser les orientations technologiques"
+            },
+            "Date limite de soumission": {
+                "patterns": [r"date limite", r"date.*soumission", r"remise.*offre", r"dépot.*dossier", r"échéance", r"fin de validité", r"📅"],
+                "categorie": "COMPLETUDE",
+                "severite": "CRITIQUE",
+                "titre": "Date limite de soumission manquante",
+                "recommendation": "Indiquer la date limite de soumission"
+            },
+            "Budget": {
+                "patterns": [r"budget", r"prix", r"coût", r"montant", r"tarif", r"(dh|mad|€|eur|dollars?)\s*\d", r"\d+\s*(dh|mad|€|eur)", r"💰"],
+                "categorie": "COMPLETUDE",
+                "severite": "CRITIQUE",
+                "titre": "Budget non défini",
+                "recommendation": "Préciser le budget alloué"
+            },
+            "Caution provisoire": {
+                "patterns": [r"caution", r"garantie", r"provision", r"warrantage", r"bloqué", r"garantie.*banque", r"🔒"],
+                "categorie": "QUALITE",
+                "severite": "MOYENNE",
+                "titre": "Caution provisoire non définie",
+                "recommendation": "Indiquer le montant de la caution provisoire"
+            },
+            "Délai d'exécution": {
+                "patterns": [r"délai", r"durée", r"durée.*exécution", r"temps.*réalisation", r"livraison", r"délai.*livraison", r"⏱️"],
+                "categorie": "COMPLETUDE",
+                "severite": "CRITIQUE",
+                "titre": "Délai d'exécution non défini",
+                "recommendation": "Préciser le délai d'exécution"
+            },
+            "Références": {
+                "patterns": [r"référence", r"portfolio", r"réalisation", r"projet.*réalisé", r"expérience", r"certificat", r"attestation", r"📚"],
+                "categorie": "QUALITE",
+                "severite": "MOYENNE",
+                "titre": "Références non mentionnées",
+                "recommendation": "Ajouter les références et réalisations"
+            },
+            "Exigences": {
+                "patterns": [r"exigence", r"contrainte", r"spécification", r"condition", r"critère", r"besoin", r"⚙️"],
+                "categorie": "QUALITE",
+                "severite": "ELEVEE",
+                "titre": "Exigences non définies",
+                "recommendation": "Détailler les exigences techniques et fonctionnelles"
+            },
+            "Modalité de paiement": {
+                "patterns": [r"paiement", r"règlement", r"avance", r"acompte", r"traite", r"échéancier", r"facturation", r"💳"],
+                "categorie": "COMPLETUDE",
+                "severite": "ELEVEE",
+                "titre": "Modalités de paiement non définies",
+                "recommendation": "Préciser les modalités de paiement"
+            },
+            "Dossier administratif": {
+                "patterns": [r"pièce.?administrative", r"document.?administratif", r"rc|registre.*commerce", r"attestation.*cnss", r"carte.*identit", r"administratif", r"📑"],
+                "categorie": "QUALITE",
+                "severite": "MOYENNE",
+                "titre": "Dossier administratif non détaillé",
+                "recommendation": "Lister les pièces administratives requises"
+            },
+            "Dossier technique": {
+                "patterns": [r"dossier technique", r"offre technique", r"méthodologie", r"planning", r"équipe", r"compétence", r"technique", r"🛠️"],
+                "categorie": "QUALITE",
+                "severite": "MOYENNE",
+                "titre": "Dossier technique non détaillé",
+                "recommendation": "Détailler les exigences du dossier technique"
+            },
+            "Dossier financier": {
+                "patterns": [r"dossier financier", r"offre financière", r"devis", r"bordereau.*prix", r"pom", r"montant.*global", r"financier", r"💵"],
+                "categorie": "QUALITE",
+                "severite": "MOYENNE",
+                "titre": "Dossier financier non détaillé",
+                "recommendation": "Détailler les exigences du dossier financier"
+            }
+        }
+        
+        texte_lower = texte.lower()
+        
+        for element_name, config in elements_cps.items():
+            found = False
+            for pattern in config["patterns"]:
+                if re.search(pattern, texte_lower):
+                    found = True
+                    break
+            
+            if not found:
+                probleme_id += 1
+                problemes.append({
+                    "id": probleme_id,
+                    "categorie": config["categorie"],
+                    "severite": config["severite"],
+                    "titre": config["titre"],
+                    "description": f"L'élément '{element_name}' n'a pas été détecté dans le document",
+                    "localisation": f"Élément CPS: {element_name}",
+                    "recommendation": config["recommendation"]
+                })
+        
+        return problemes
+    
+    def _extraire_elements_cps(self, texte: str) -> Dict[str, Any]:
+        """Extrait les éléments CPS du cahier des charges.
+        Uses DocumentExtractor.extract_cps_metadata() for core metadata,
+        with strict guards for list fields to avoid garbled text."""
+        import re
+        from src.services.document_extractor import DocumentExtractor
+
+        # Use our improved regex metadata extraction
+        doc_extractor = DocumentExtractor()
+        meta_result = doc_extractor.extract_cps_metadata(texte)
+
+        # Handle both flat format and nested format from extract_cps_metadata
+        # Flat: {nom_client: ..., contraintes_projet: {...}}
+        # Nested: {metadonnees: {...}, contraintes_projet: {...}}
+        if "metadonnees" in meta_result:
+            meta = meta_result.get("metadonnees", {})
+        else:
+            meta = {
+                "nom_client": meta_result.get("nom_client"),
+                "objet": meta_result.get("objet"),
+                "objectifs": meta_result.get("objectifs", []),
+                "orientations_technologiques": meta_result.get("orientations_technologiques", []),
+            }
+        
+        contraintes = meta_result.get("contraintes_projet", {}) or {}
+
+        # Start with the metadata extraction result
+        extraction = {
+            "metadonnees": meta,
+            "contraintes_projet": contraintes,
+            "dossier_reponse": {"administratif": [], "technique": [], "financier": []},
+            "references": [],
+            "exigences": [],
+            "modalites_paiement": [],
+        }
+
+        # Helper: filter out garbled/legal-reference noise from list items
+        def _clean_items(raw_items: list, max_len: int = 150) -> list:
+            cleaned = []
+            noise_patterns = [
+                r"décret", r"loi\s+n[°\s]", r"dou\s+al", r"ramadan", r"rabii",
+                r"hija", r"article\s+\d+", r"EMO", r"relative\s+au\s+contrôle",
+                r"formant\s+code\s+de\s+commerce", r"prévalent", r"se\s+dérober",
+                r"avances\s+en\s+matière", r"contrôle\s+financier",
+            ]
+            for item in raw_items:
+                item = item.strip()
+                if not item or len(item) > max_len:
+                    continue
+                if re.search('|'.join(noise_patterns), item, re.I):
+                    continue
+                cleaned.append(item)
+            return cleaned
+
+        # Dossier de réponse - Administrative (strict: look for numbered pieces)
+        admin_match = re.search(
+            r"(?:dossier\s*(?:de\s*)?réponse\s*(?:administratif)?)\s*[:\-]?\s*\n(.*?)(?=\n\s*(?:technique|financier|dossier|$))",
+            texte, re.I | re.DOTALL
+        )
+        if admin_match:
+            items = re.findall(r"(?:[-•·]|\d+[\.)])\s*([^\n]{5,150})", admin_match.group(1))
+            extraction["dossier_reponse"]["administratif"] = _clean_items(items)
+
+        # Dossier de réponse - Technique
+        tech_match = re.search(
+            r"(?:offre\s*(?:technique)?|dossier\s*technique|mémoire\s*technique)\s*[:\-]?\s*\n(.*?)(?=\n\s*(?:financier|$))",
+            texte, re.I | re.DOTALL
+        )
+        if tech_match:
+            items = re.findall(r"(?:[-•·]|\d+[\.)])\s*([^\n]{5,150})", tech_match.group(1))
+            extraction["dossier_reponse"]["technique"] = _clean_items(items)
+
+        # Dossier de réponse - Financier
+        fin_match = re.search(
+            r"(?:offre\s*financière|dossier\s*financier|devis|bordereau\s*(?:des\s*)?prix)\s*[:\-]?\s*\n(.*?)(?=\n\s*(?:article|conditions|$))",
+            texte, re.I | re.DOTALL
+        )
+        if fin_match:
+            items = re.findall(r"(?:[-•·]|\d+[\.)])\s*([^\n]{5,150})", fin_match.group(1))
+            extraction["dossier_reponse"]["financier"] = _clean_items(items)
+
+        # References - look for actual law/decree references, not random text
+        ref_match = re.search(
+            r"(?:références?(?:\s*bibliographiques?)?|textes\s*(?:de\s*)?référence|références\s*législatives?)\s*[:\-]?\s*\n(.*?)(?=\n\s*(?:exigences|modalités|dossier|$))",
+            texte, re.I | re.DOTALL
+        )
+        if ref_match:
+            items = re.findall(r"(?:[-•·]|\d+[\.)])\s*([^\n]{10,200})", ref_match.group(1))
+            extraction["references"] = _clean_items(items, max_len=200)
+
+        # Exigences - look for explicit requirement sections
+        exi_match = re.search(
+            r"(?:exigences?(?:\s*(?:fonctionnelles?|techniques?|de\s*sécurité|spécifiques))?|prescriptions\s*(?:spéciales?|particulières)?)\s*[:\-]?\s*\n(.*?)(?=\n\s*(?:modalités|paiement|dossier|article\s+\d+|$))",
+            texte, re.I | re.DOTALL
+        )
+        if exi_match:
+            items = re.findall(r"(?:[-•·]|\d+[\.)])\s*([^\n]{10,200})", exi_match.group(1))
+            extraction["exigences"] = _clean_items(items, max_len=200)
+
+        # Modalités de paiement - look for actual payment terms
+        pai_match = re.search(
+            r"(?:modalités?\s*(?:de\s*)?paiement|conditions?\s*(?:de\s*)?paiement|échéancier\s*(?:de\s*)?paiement)\s*[:\-]?\s*\n(.*?)(?=\n\s*(?:dossier|article\s+\d+|conditions?\s+(?:de|générales)|$))",
+            texte, re.I | re.DOTALL
+        )
+        if pai_match:
+            items = re.findall(r"(?:[-•·]|\d+[\.)])\s*([^\n]{10,200})", pai_match.group(1))
+            extraction["modalites_paiement"] = _clean_items(items, max_len=200)
+
+        return extraction
     
     def _extraire_elements(self, texte: str) -> Dict[str, List[str]]:
         """Extrait les éléments du cahier des charges"""
@@ -507,9 +889,9 @@ Réponds en JSON strictement."""
         }
 
 
-def analyser_cahier(texte: str, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False, analyse_avancee: bool = False) -> Dict[str, Any]:
+def analyser_cahier(texte: str, api_token: Optional[str] = None, use_ollama: bool = False, use_huggingface: bool = False, use_groq: bool = False, groq_api_key: Optional[str] = None, analyse_avancee: bool = False) -> Dict[str, Any]:
     """Fonction principale d'analyse"""
-    analyzer = CahierDesChargesAnalyzer(api_token, use_ollama, use_huggingface)
+    analyzer = CahierDesChargesAnalyzer(api_token, use_ollama, use_huggingface, use_groq, groq_api_key)
     
     if analyse_avancee:
         return analyzer.analyser_avance(texte)

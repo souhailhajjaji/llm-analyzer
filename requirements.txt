@@ -8,3 +8,8 @@ httpx
 python-multipart
 streamlit>=1.30.0
 requests>=2.31.0
+pypdf
+pdfplumber
+pdf2image
+easyocr
+opencv-python

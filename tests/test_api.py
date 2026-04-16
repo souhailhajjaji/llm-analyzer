@@ -18,41 +18,31 @@ class TestAPI:
         assert data["status"] == "running"
 
     def test_health_endpoint(self):
-        with patch('src.api.routes.routes.OllamaAnalyzer') as mock_analyzer:
-            mock_instance = Mock()
-            mock_instance.health_check.return_value = True
-            mock_analyzer.return_value = mock_instance
-            mock_instance.close = Mock()
-            
-            response = client.get("/api/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert "status" in data
-            assert "ollama" in data
+        from src.services.llm_analyzer import AnalyzerWithFallback
+        from src.api.main import app
+        
+        app.state.analyzer = AnalyzerWithFallback()
+        
+        response = client.get("/api/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert "status" in data
+        assert "ollama" in data
 
     def test_analyze_invalid_file_type(self):
-        with patch('src.api.routes.routes.OllamaAnalyzer') as mock_analyzer:
-            mock_instance = Mock()
-            mock_instance.health_check.return_value = True
-            mock_analyzer.return_value = mock_instance
-            mock_instance.close = Mock()
-            
-            response = client.post(
-                "/api/analyze",
-                files={"file": ("test.txt", b"content", "text/plain")}
-            )
-            assert response.status_code == 400
+        response = client.post(
+            "/api/analyze",
+            files={"file": ("test.txt", b"content", "text/plain")}
+        )
+        assert response.status_code == 400
 
     def test_analyze_text_endpoint(self):
-        with patch('src.api.routes.routes.OllamaAnalyzer') as mock_analyzer:
-            mock_instance = Mock()
-            mock_instance.analyze_full.return_value = {
+        with patch('analyzer.analyser_cahier') as mock_analyze:
+            mock_analyze.return_value = {
                 "extraction": {},
                 "analysis": {"issues": []},
                 "recommendations": {"recommendations": []}
             }
-            mock_analyzer.return_value = mock_instance
-            mock_instance.close = Mock()
             
             response = client.post(
                 "/api/analyze/text",

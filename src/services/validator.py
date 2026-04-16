@@ -33,11 +33,26 @@ class Issue(BaseModel):
 
 
 class ExtractionData(BaseModel):
-    functionalities: list[str] = Field(default_factory=list)
-    actors: list[str] = Field(default_factory=list)
-    constraints: list[str] = Field(default_factory=list)
-    interfaces: list[str] = Field(default_factory=list)
-    data: list[str] = Field(default_factory=list)
+    metadonnees: dict = Field(default_factory=lambda: {
+        "nom_client": None,
+        "objet": None,
+        "objectifs": [],
+        "orientations_technologiques": []
+    })
+    contraintes_projet: dict = Field(default_factory=lambda: {
+        "date_limite_soumission": None,
+        "budget": None,
+        "caution_provisoire": None,
+        "delai_execution": None
+    })
+    dossier_reponse: dict = Field(default_factory=lambda: {
+        "administratif": [],
+        "technique": [],
+        "financier": []
+    })
+    references: list[str] = Field(default_factory=list)
+    exigences: list[str] = Field(default_factory=list)
+    modalites_paiement: list[str] = Field(default_factory=list)
 
 
 class AnalysisData(BaseModel):

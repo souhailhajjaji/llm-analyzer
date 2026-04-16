@@ -1,9 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { analysisApi } from './services/api';
-import type { AnalysisReport, HealthStatus, AnalysisStatus } from './types';
+import type { AnalysisReport, HealthStatus, AnalysisStatus, HistoryItem } from './types';
 import { 
   Upload, FileText, AlertTriangle, CheckCircle, 
-  Loader2, RefreshCw, Send, ThumbsUp, ThumbsDown 
+  Loader2, RefreshCw, Send, ThumbsUp, ThumbsDown, History, Trash2
 } from 'lucide-react';
 
 function App() {
@@ -15,6 +15,8 @@ function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const checkHealth = useCallback(async () => {
     try {
@@ -28,6 +30,39 @@ function App() {
   useState(() => {
     checkHealth();
   });
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const data = await analysisApi.getAnalyses();
+      setHistory(data.analyses || []);
+    } catch (err) {
+      console.error('Failed to load history', err);
+    }
+  }, []);
+
+  const viewHistoryItem = async (id: string) => {
+    try {
+      const result = await analysisApi.getAnalysisResult(id);
+      setReport(result as unknown as AnalysisReport);
+      setShowHistory(false);
+    } catch (err) {
+      setError('Failed to load analysis');
+    }
+  };
+
+  const deleteHistoryItem = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await analysisApi.deleteAnalysis(id);
+      loadHistory();
+    } catch (err) {
+      setError('Failed to delete analysis');
+    }
+  };
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const handleFile = async (file: File) => {
     if (!file) return;
@@ -72,11 +107,10 @@ function App() {
     setAnalyzing(true);
     
     try {
-      const response = await analysisApi.analyzeText(textInput);
-      const reportData = response.result || response;
+      const reportData = await analysisApi.analyzeText(textInput);
       
-      const transformedReport = {
-        ...reportData,
+      const transformedReport: AnalysisReport = {
+        ...reportData as unknown as AnalysisReport,
         summary: {
           total_issues: reportData.resume?.total_problemes ?? 0,
           by_severity: {
@@ -84,8 +118,10 @@ function App() {
             high: reportData.resume?.eleves ?? 0,
             medium: reportData.resume?.moyens ?? 0,
             low: reportData.resume?.faibles ?? 0,
+            total: 0,
           },
           by_category: {},
+          confidence_level: 'medium',
         },
         issues: (reportData.problemes ?? []).map((p: any) => ({
           id: p.id,
@@ -94,14 +130,36 @@ function App() {
           severity: p.severite?.toLowerCase() ?? 'medium',
           location: p.localisation ?? '',
           recommendation: p.recommendation ?? '',
-          description: p.description ?? '',
+          pattern_id: '',
         })),
         extraction: {
-          functionalities: reportData.extraction?.functionalites ?? [],
-          actors: reportData.extraction?.acteurs ?? [],
-          constraints: reportData.extraction?.contraintes ?? [],
-          interfaces: reportData.extraction?.interfaces ?? [],
-          data: reportData.extraction?.donnees ?? [],
+          metadonnees: {
+            nom_client: reportData.extraction?.metadonnees?.nom_client ?? null,
+            objet: reportData.extraction?.metadonnees?.objet ?? null,
+            objectifs: reportData.extraction?.metadonnees?.objectifs ?? [],
+            orientations_technologiques: reportData.extraction?.metadonnees?.orientations_technologiques ?? [],
+          },
+          contraintes_projet: {
+            date_limite_soumission: reportData.extraction?.contraintes_projet?.date_limite_soumission ?? null,
+            budget: reportData.extraction?.contraintes_projet?.budget ?? null,
+            caution_provisoire: reportData.extraction?.contraintes_projet?.caution_provisoire ?? null,
+            delai_execution: reportData.extraction?.contraintes_projet?.delai_execution ?? null,
+          },
+          dossier_reponse: {
+            administratif: reportData.extraction?.dossier_reponse?.administratif ?? [],
+            technique: reportData.extraction?.dossier_reponse?.technique ?? [],
+            financier: reportData.extraction?.dossier_reponse?.financier ?? [],
+          },
+          references: reportData.extraction?.references ?? [],
+          exigences: reportData.extraction?.exigences ?? [],
+          modalites_paiement: reportData.extraction?.modalites_paiement ?? [],
+        },
+        recommendations: [],
+        statistics: {
+          total_issues: reportData.resume?.total_problemes ?? 0,
+          critical_percentage: 0,
+          high_percentage: 0,
+          issues_per_functionality: 0,
         },
         confidence_score: reportData.resume?.confidence_score ?? 0.8,
         generated_at: reportData.generated_at ?? new Date().toISOString(),
@@ -153,6 +211,13 @@ function App() {
                 {health.ollama === 'connected' ? 'Connecté' : 'Déconnecté'}
               </span>
             ) : 'Vérifier'}
+          </button>
+          <button
+            onClick={() => { setShowHistory(true); loadHistory(); }}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors text-sm"
+          >
+            <History className="w-4 h-4" />
+            Historique
           </button>
         </div>
       </header>
@@ -285,26 +350,91 @@ function App() {
 
             <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
               <h3 className="text-lg font-semibold mb-4">Extraction des éléments</h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              
+              <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <p className="text-gray-500 text-xs mb-2">Fonctionnalités</p>
-                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.functionalities?.length ?? 0}</p>
+                  <p className="text-gray-500 text-xs mb-2 font-medium">Métadonnées</p>
+                  {report?.extraction?.metadonnees?.nom_client && (
+                    <p className="text-sm"><span className="text-gray-400">Client:</span> {report.extraction.metadonnees.nom_client}</p>
+                  )}
+                  {report?.extraction?.metadonnees?.objet && (
+                    <p className="text-sm"><span className="text-gray-400">Objet:</span> {report.extraction.metadonnees.objet}</p>
+                  )}
+                  {report?.extraction?.metadonnees?.objectifs?.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-gray-500 text-xs">Objectifs:</p>
+                      <ul className="text-sm list-disc list-inside">
+                        {report.extraction.metadonnees.objectifs.map((o, i) => <li key={i}>{o}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {report?.extraction?.metadonnees?.orientations_technologiques?.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-gray-500 text-xs">Orientations technologiques:</p>
+                      <ul className="text-sm list-disc list-inside">
+                        {report.extraction.metadonnees.orientations_technologiques.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                
+                <div>
+                  <p className="text-gray-500 text-xs mb-2 font-medium">Contraintes Projet</p>
+                  {report?.extraction?.contraintes_projet?.date_limite_soumission && (
+                    <p className="text-sm"><span className="text-gray-400">Date limite:</span> {report.extraction.contraintes_projet.date_limite_soumission}</p>
+                  )}
+                  {report?.extraction?.contraintes_projet?.budget && (
+                    <p className="text-sm"><span className="text-gray-400">Budget:</span> {report.extraction.contraintes_projet.budget}</p>
+                  )}
+                  {report?.extraction?.contraintes_projet?.caution_provisoire && (
+                    <p className="text-sm"><span className="text-gray-400">Caution:</span> {report.extraction.contraintes_projet.caution_provisoire}</p>
+                  )}
+                  {report?.extraction?.contraintes_projet?.delai_execution && (
+                    <p className="text-sm"><span className="text-gray-400">Délai:</span> {report.extraction.contraintes_projet.delai_execution}</p>
+                  )}
+                </div>
+              </div>
+              
+              {(report?.extraction?.dossier_reponse?.administratif?.length > 0 || 
+                report?.extraction?.dossier_reponse?.technique?.length > 0 || 
+                report?.extraction?.dossier_reponse?.financier?.length > 0) && (
+                <div className="mt-4 pt-4 border-t border-gray-800">
+                  <p className="text-gray-500 text-xs mb-2 font-medium">Dossier de Réponse</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-400">Administratif:</p>
+                      <ul className="text-sm list-disc list-inside">
+                        {report?.extraction?.dossier_reponse?.administratif?.map((a, i) => <li key={i}>{a}</li>)}
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400">Technique:</p>
+                      <ul className="text-sm list-disc list-inside">
+                        {report?.extraction?.dossier_reponse?.technique?.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400">Financier:</p>
+                      <ul className="text-sm list-disc list-inside">
+                        {report?.extraction?.dossier_reponse?.financier?.map((f, i) => <li key={i}>{f}</li>)}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-gray-800">
+                <div>
+                  <p className="text-gray-500 text-xs mb-2">Références</p>
+                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.references?.length ?? 0}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs mb-2">Acteurs</p>
-                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.actors?.length ?? 0}</p>
+                  <p className="text-gray-500 text-xs mb-2">Exigences</p>
+                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.exigences?.length ?? 0}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-xs mb-2">Contraintes</p>
-                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.constraints?.length ?? 0}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-xs mb-2">Interfaces</p>
-                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.interfaces?.length ?? 0}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-xs mb-2">Données</p>
-                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.data?.length ?? 0}</p>
+                  <p className="text-gray-500 text-xs mb-2">Modalités Paiement</p>
+                  <p className="text-xl font-semibold text-indigo-400">{report?.extraction?.modalites_paiement?.length ?? 0}</p>
                 </div>
               </div>
             </div>
@@ -351,6 +481,83 @@ function App() {
           </div>
         )}
       </main>
+
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl border border-gray-800 w-full max-w-3xl max-h-[80vh] overflow-hidden">
+            <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Historique des analyses</h2>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-auto max-h-[calc(80vh-80px)]">
+              {history.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  Aucune analyse dans l'historique
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-800/50 sticky top-0">
+                    <tr>
+                      <th className="text-left p-3 text-sm font-medium text-gray-400">Date</th>
+                      <th className="text-left p-3 text-sm font-medium text-gray-400">Client</th>
+                      <th className="text-left p-3 text-sm font-medium text-gray-400">Objet</th>
+                      <th className="text-left p-3 text-sm font-medium text-gray-400">Problèmes</th>
+                      <th className="text-left p-3 text-sm font-medium text-gray-400">Statut</th>
+                      <th className="p-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {history.map((item) => (
+                      <tr
+                        key={item.id}
+                        onClick={() => viewHistoryItem(item.id)}
+                        className="hover:bg-gray-800/50 cursor-pointer transition-colors"
+                      >
+                        <td className="p-3 text-sm">
+                          {item.created_at ? new Date(item.created_at * 1000).toLocaleString('fr-FR') : '-'}
+                        </td>
+                        <td className="p-3 text-sm">{item.nom_client || '-'}</td>
+                        <td className="p-3 text-sm max-w-xs truncate">{item.objet || '-'}</td>
+                        <td className="p-3 text-sm">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            item.total_problemes === 0 ? 'bg-green-500/20 text-green-400' :
+                            item.total_problemes > 5 ? 'bg-red-500/20 text-red-400' :
+                            'bg-yellow-500/20 text-yellow-400'
+                          }`}>
+                            {item.total_problemes}
+                          </span>
+                        </td>
+                        <td className="p-3 text-sm">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            item.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                            item.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                            'bg-yellow-500/20 text-yellow-400'
+                          }`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <button
+                            onClick={(e) => deleteHistoryItem(item.id, e)}
+                            className="p-1 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from src.services.document_extractor import DocumentExtractor
 from src.services.validator import Validator
+from src.core.config import settings
 from src.services.report_generator import ReportGenerator
 from src.services.rule_analyzer import analyze_with_rules
 from src.services.hybrid_analyzer import analyze_hybrid
@@ -39,7 +40,6 @@ async def health_check(request: Request):
     return {
         "status": "healthy" if analyzer.health_check() else "degraded",
         "model": analyzer.get_model_name(),
-        "ollama": "connected" if analyzer.ollama_analyzer and analyzer.ollama_analyzer.health_check() else "disconnected",
     }
 
 
@@ -49,8 +49,9 @@ async def analyze_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ):
-    if not file.filename.endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only .docx files are supported")
+    allowed = [".docx", ".pdf"]
+    if not any(file.filename.endswith(ext) for ext in allowed):
+        raise HTTPException(status_code=400, detail=f"Only {allowed} files are supported")
     
     analysis_id = str(uuid.uuid4())
     
@@ -118,7 +119,11 @@ async def analyze_text(request: Request, analyze_request: AnalyzeRequest):
     try:
         result = analyser_cahier(
             analyze_request.text,
-            use_huggingface=False,
+            api_token=settings.HF_TOKEN,
+            use_ollama=settings.USE_OLLAMA,
+            use_huggingface=settings.USE_HUGGINGFACE,
+            use_groq=settings.USE_GROQ,
+            groq_api_key=settings.GROQ_API_KEY,
             analyse_avancee=analyze_request.analyse_avancee
         )
         
@@ -220,3 +225,45 @@ async def submit_feedback(request: FeedbackRequest):
     })
     
     return {"status": "feedback recorded", "feedback": analysis["feedback"]}
+
+
+@router.get("/analyses")
+async def get_analyses():
+    """Retourne la liste de toutes les analyses de la session"""
+    analyses = []
+    for analysis_id, data in ANALYSIS_STORE.items():
+        result = data.get("result", {})
+        extraction = result.get("extraction", {})
+        resume = result.get("resume", {})
+        
+        nom_client = None
+        objet = None
+        
+        if extraction:
+            metadonnees = extraction.get("metadonnees", {})
+            nom_client = metadonnees.get("nom_client")
+            objet = metadonnees.get("objet")
+        
+        analyses.append({
+            "id": analysis_id,
+            "filename": data.get("filename"),
+            "status": data.get("status"),
+            "nom_client": nom_client,
+            "objet": objet,
+            "total_problemes": resume.get("total_problemes", 0),
+            "created_at": data.get("started_at") or data.get("completed_at") or data.get("failed_at"),
+        })
+    
+    analyses.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    
+    return {"analyses": analyses}
+
+
+@router.delete("/analyses/{analysis_id}")
+async def delete_analysis(analysis_id: str):
+    """Supprime une analyse de l'historique"""
+    if analysis_id not in ANALYSIS_STORE:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    
+    del ANALYSIS_STORE[analysis_id]
+    return {"status": "deleted", "id": analysis_id}

@@ -18,11 +18,26 @@ export interface Recommendation {
 }
 
 export interface Extraction {
-  functionalities: string[];
-  actors: string[];
-  constraints: string[];
-  interfaces: string[];
-  data: string[];
+  metadonnees: {
+    nom_client: string | null;
+    objet: string | null;
+    objectifs: string[];
+    orientations_technologiques: string[];
+  };
+  contraintes_projet: {
+    date_limite_soumission: string | null;
+    budget: string | null;
+    caution_provisoire: string | null;
+    delai_execution: string | null;
+  };
+  dossier_reponse: {
+    administratif: string[];
+    technique: string[];
+    financier: string[];
+  };
+  references: string[];
+  exigences: string[];
+  modalites_paiement: string[];
 }
 
 export interface Summary {
@@ -73,4 +88,60 @@ export interface FeedbackRequest {
   issue_id: string;
   is_valid: boolean;
   comment?: string;
+}
+
+export interface RawAnalysisResponse {
+  status: string;
+  result?: AnalysisReport;
+  resume?: {
+    total_problemes: number;
+    critiques: number;
+    eleves: number;
+    moyens: number;
+    faibles: number;
+    confidence_score?: number;
+  };
+  problemes?: Array<{
+    id: string;
+    titre: string;
+    categorie: string;
+    severite: string;
+    localisation?: string;
+    recommendation?: string;
+    description?: string;
+  }>;
+  extraction?: {
+    metadonnees?: {
+      nom_client?: string | null;
+      objet?: string | null;
+      objectifs?: string[];
+      orientations_technologiques?: string[];
+    };
+    contraintes_projet?: {
+      date_limite_soumission?: string | null;
+      budget?: string | null;
+      caution_provisoire?: string | null;
+      delai_execution?: string | null;
+    };
+    dossier_reponse?: {
+      administratif?: string[];
+      technique?: string[];
+      financier?: string[];
+    };
+    references?: string[];
+    exigences?: string[];
+    modalites_paiement?: string[];
+  };
+  generated_at?: string;
+  processing_time_ms?: number;
+}
+
+export interface HistoryItem {
+  id: string;
+  filename: string;
+  status: string;
+  nom_client: string | null;
+  objet: string | null;
+  total_problemes: number;
+  created_at: number;
 }

@@ -3,7 +3,7 @@ import time
 import re
 import httpx
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.core.config import settings
 from src.core.prompts import (
@@ -12,6 +12,206 @@ from src.core.prompts import (
     build_analysis_prompt,
     build_recommendation_prompt,
 )
+
+
+def validate_extraction_schema(data: dict | None) -> dict:
+    """Validate and fix extraction JSON against expected schema.
+    Returns the validated/fixed data with all required fields present."""
+    
+    # Key mapping: alternative names -> expected names
+    key_mapping = {
+        "maître_ouvre": "nom_client",
+        "maitre_ouvre": "nom_client",
+        "maitre_d_ouvrage": "nom_client",
+        "titre": "objet",
+        "consistance_des_prestations": "objet",
+        "appel_d_offres": "objet",
+        "délai_d_exécution": "delai_execution",
+        "delai_execution": "delai_execution",
+        "duree": "delai_execution",
+        "cautionnement_provisoire": "caution_provisoire",
+        "caution": "caution_provisoire",
+        "cautionnement_définitif": "caution_provisoire",
+        "date_limite": "date_limite_soumission",
+        "date": "date_limite_soumission",
+        "montant": "budget",
+        "prix": "budget",
+        "pièces_constitutives_du_marché": "references",
+        "textes_généraux": "references",
+        "exigences": "exigences",
+        "conditions": "exigences",
+        "pénalités_pour_retard": "exigences",
+        "retenue_de_garantie": "modalites_paiement",
+        "garantie": "modalites_paiement",
+        "orientations_technologiques": "orientations_technologiques",
+    }
+    
+    expected_structure = {
+        "extraction": {
+            "metadonnees": {
+                "nom_client": (str, type(None)),
+                "objet": (str, type(None)),
+                "objectifs": (list,),
+                "orientations_technologiques": (list,),
+            },
+            "contraintes_projet": {
+                "date_limite_soumission": (str, type(None)),
+                "budget": (str, type(None)),
+                "caution_provisoire": (str, type(None)),
+                "delai_execution": (str, type(None)),
+            },
+            "dossier_reponse": {
+                "administratif": (list,),
+                "technique": (list,),
+                "financier": (list,),
+            },
+            "references": (list,),
+            "exigences": (list,),
+            "modalites_paiement": (list,),
+        }
+    }
+
+    if not data or not isinstance(data, dict):
+        return {"extraction": _default_extraction()}
+
+    extraction = data.get("extraction", data)  # Handle both wrapped and unwrapped
+
+    if not isinstance(extraction, dict):
+        return {"extraction": _default_extraction()}
+    
+    # First, collect alternative key values BEFORE validation
+    alt_values = {}
+    for alt_key, std_key in key_mapping.items():
+        if alt_key in extraction:
+            value = extraction.get(alt_key)
+            if value is not None:
+                alt_values[std_key] = value
+
+    # Validate metadonnees
+    meta = extraction.get("metadonnees", {})
+    if not isinstance(meta, dict):
+        meta = {}
+    validated_meta = {}
+    for key, expected_types in expected_structure["extraction"]["metadonnees"].items():
+        value = meta.get(key)
+        if isinstance(value, expected_types):
+            validated_meta[key] = value
+        else:
+            validated_meta[key] = [] if isinstance(expected_types, tuple) and list in expected_types else None
+    extraction["metadonnees"] = validated_meta
+
+    # Validate contraintes_projet
+    contraintes = extraction.get("contraintes_projet", {})
+    if not isinstance(contraintes, dict):
+        contraintes = {}
+    validated_contraintes = {}
+    for key, expected_types in expected_structure["extraction"]["contraintes_projet"].items():
+        value = contraintes.get(key)
+        if isinstance(value, expected_types):
+            validated_contraintes[key] = value
+        else:
+            validated_contraintes[key] = None
+    extraction["contraintes_projet"] = validated_contraintes
+
+    # Validate dossier_reponse
+    dossier = extraction.get("dossier_reponse", {})
+    if not isinstance(dossier, dict):
+        dossier = {}
+    validated_dossier = {}
+    for key, expected_types in expected_structure["extraction"]["dossier_reponse"].items():
+        value = dossier.get(key)
+        if isinstance(value, expected_types):
+            # Filter out entries that are too long (garbled text) or not strings
+            cleaned = []
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and len(item.strip()) < 300:
+                        cleaned.append(item.strip())
+            validated_dossier[key] = cleaned
+        else:
+            validated_dossier[key] = []
+    extraction["dossier_reponse"] = validated_dossier
+
+    # Validate list fields
+    for list_key in ["references", "exigences", "modalites_paiement"]:
+        value = extraction.get(list_key, [])
+        if not isinstance(value, list):
+            extraction[list_key] = []
+        else:
+            # Clean: keep only strings under 300 chars
+            extraction[list_key] = [
+                item.strip() for item in value
+                if isinstance(item, str) and len(item.strip()) < 300
+            ]
+    
+    # Fill in missing values from alternative keys
+    if alt_values:
+        meta = extraction.get("metadonnees", {})
+        contraintes = extraction.get("contraintes_projet", {})
+        
+        for key, value in alt_values.items():
+            if key in expected_structure["extraction"]["metadonnees"]:
+                if not meta.get(key):
+                    meta[key] = value
+            elif key in expected_structure["extraction"]["contraintes_projet"]:
+                if not contraintes.get(key):
+                    contraintes[key] = value
+        
+        extraction["metadonnees"] = meta
+        extraction["contraintes_projet"] = contraintes
+
+    return {"extraction": extraction}
+
+
+def _default_extraction() -> dict:
+    return {
+        "metadonnees": {
+            "nom_client": None,
+            "objet": None,
+            "objectifs": [],
+            "orientations_technologiques": [],
+        },
+        "contraintes_projet": {
+            "date_limite_soumission": None,
+            "budget": None,
+            "caution_provisoire": None,
+            "delai_execution": None,
+        },
+        "dossier_reponse": {
+            "administratif": [],
+            "technique": [],
+            "financier": [],
+        },
+        "references": [],
+        "exigences": [],
+        "modalites_paiement": [],
+    }
+
+
+def merge_extraction_with_fallback(llm_result: dict, regex_result: dict) -> dict:
+    """Merge LLM extraction with regex fallback - use regex values for None/empty LLM fields."""
+    extraction = llm_result.get("extraction", {})
+    meta = extraction.get("metadonnees", {})
+    contraintes = extraction.get("contraintes_projet", {})
+
+    regex_meta = regex_result.get("metadonnees", {})
+    regex_contraintes = regex_result.get("contraintes_projet", {})
+
+    # Fill in None/empty LLM fields with regex values
+    for key in ["nom_client", "objet"]:
+        if not meta.get(key) and regex_meta.get(key):
+            meta[key] = regex_meta[key]
+
+    for key in ["objectifs", "orientations_technologiques"]:
+        if not meta.get(key) or (isinstance(meta.get(key), list) and len(meta[key]) == 0):
+            if regex_meta.get(key):
+                meta[key] = regex_meta[key]
+
+    for key in ["date_limite_soumission", "budget", "caution_provisoire", "delai_execution"]:
+        if not contraintes.get(key) and regex_contraintes.get(key):
+            contraintes[key] = regex_contraintes[key]
+
+    return {"extraction": extraction}
 
 
 @dataclass
@@ -305,9 +505,16 @@ class UnslothAnalyzer:
             raise RuntimeError(f"Unsloth inference error: {e}")
 
     def extract_entities(self, document_text: str) -> dict:
+        from src.services.document_extractor import DocumentExtractor
         prompt = build_extraction_prompt(document_text)
         response = self._call_model(prompt)
-        return self._parse_json_response(response.content)
+        llm_result = self._parse_json_response(response.content)
+
+        # Use regex extraction as fallback for empty/None fields
+        doc_extractor = DocumentExtractor()
+        regex_result = doc_extractor.extract_cps_metadata(document_text)
+
+        return merge_extraction_with_fallback(llm_result, regex_result)
 
     def analyze_document(self, document_text: str) -> dict:
         prompt = build_analysis_prompt(document_text)
@@ -338,28 +545,52 @@ class UnslothAnalyzer:
 
     def _parse_json_response(self, content: str) -> dict:
         content = content.strip()
-        
+
+        # Strip markdown code fences
         if content.startswith("```json"):
             content = content[7:]
         elif content.startswith("```"):
             content = content[3:]
-        
+
         if content.endswith("```"):
             content = content[:-3]
-        
+
         content = content.strip()
-        
+
+        # Try direct JSON parse
         try:
-            return json.loads(content)
+            parsed = json.loads(content)
+            return validate_extraction_schema(parsed)
         except json.JSONDecodeError:
-            json_match = content.find("{")
-            if json_match != -1:
+            pass
+
+        # Try to find JSON object in content
+        json_match = content.find("{")
+        if json_match != -1:
+            # Try from first { to end
+            try:
+                parsed = json.loads(content[json_match:])
+                return validate_extraction_schema(parsed)
+            except json.JSONDecodeError:
+                # Try balanced braces
+                depth = 0
+                end_pos = json_match
+                for i, c in enumerate(content[json_match:], json_match):
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end_pos = i + 1
+                            break
                 try:
-                    return json.loads(content[json_match:])
-                except json.JSONDecodeError:
+                    parsed = json.loads(content[json_match:end_pos])
+                    return validate_extraction_schema(parsed)
+                except (json.JSONDecodeError, IndexError):
                     pass
-            
-            return {"raw": content, "error": "Failed to parse JSON"}
+
+        # All parsing failed - return default structure
+        return {"extraction": _default_extraction()}
 
     def health_check(self) -> bool:
         return self.model is not None and self.tokenizer is not None
@@ -426,9 +657,9 @@ class HuggingFaceAnalyzer:
             
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=50,
-                temperature=0.3,
-                do_sample=False,
+                max_new_tokens=2000,
+                temperature=0.1,
+                do_sample=True,
             )
             
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -446,9 +677,16 @@ class HuggingFaceAnalyzer:
             raise RuntimeError(f"HuggingFace inference error: {e}")
 
     def extract_entities(self, document_text: str) -> dict:
+        from src.services.document_extractor import DocumentExtractor
         prompt = build_extraction_prompt(document_text)
         response = self._call_model(prompt)
-        return self._parse_json_response(response.content)
+        llm_result = self._parse_json_response(response.content)
+
+        # Use regex extraction as fallback for empty/None fields
+        doc_extractor = DocumentExtractor()
+        regex_result = doc_extractor.extract_cps_metadata(document_text)
+
+        return merge_extraction_with_fallback(llm_result, regex_result)
 
     def analyze_document(self, document_text: str) -> dict:
         prompt = build_analysis_prompt(document_text)
@@ -479,28 +717,52 @@ class HuggingFaceAnalyzer:
 
     def _parse_json_response(self, content: str) -> dict:
         content = content.strip()
-        
+
+        # Strip markdown code fences
         if content.startswith("```json"):
             content = content[7:]
         elif content.startswith("```"):
             content = content[3:]
-        
+
         if content.endswith("```"):
             content = content[:-3]
-        
+
         content = content.strip()
-        
+
+        # Try direct JSON parse
         try:
-            return json.loads(content)
+            parsed = json.loads(content)
+            return validate_extraction_schema(parsed)
         except json.JSONDecodeError:
-            json_match = content.find("{")
-            if json_match != -1:
+            pass
+
+        # Try to find JSON object in content
+        json_match = content.find("{")
+        if json_match != -1:
+            # Try from first { to end
+            try:
+                parsed = json.loads(content[json_match:])
+                return validate_extraction_schema(parsed)
+            except json.JSONDecodeError:
+                # Try balanced braces
+                depth = 0
+                end_pos = json_match
+                for i, c in enumerate(content[json_match:], json_match):
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end_pos = i + 1
+                            break
                 try:
-                    return json.loads(content[json_match:])
-                except json.JSONDecodeError:
+                    parsed = json.loads(content[json_match:end_pos])
+                    return validate_extraction_schema(parsed)
+                except (json.JSONDecodeError, IndexError):
                     pass
-            
-            return {"raw": content, "error": "Failed to parse JSON"}
+
+        # All parsing failed - return default structure
+        return {"extraction": _default_extraction()}
 
     def health_check(self) -> bool:
         return self.model is not None and self.tokenizer is not None
@@ -511,6 +773,192 @@ class HuggingFaceAnalyzer:
             del self.tokenizer
             self.model = None
             self.tokenizer = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+
+class GroqAnalyzer:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: Optional[int] = None,
+        max_retries: int = 3,
+    ):
+        self.api_key = api_key or settings.GROQ_API_KEY
+        self.model = model or settings.GROQ_MODEL
+        self.timeout = timeout or settings.GROQ_TIMEOUT
+        self.max_retries = max_retries
+        self.base_url = "https://api.groq.com/openai/v1"
+        self.client = httpx.Client(timeout=self.timeout)
+
+    def _call_api(self, prompt: str, system: Optional[str] = None) -> LLMResponse:
+        system = system or SYSTEM_PROMPT
+        
+        # Truncate prompt if too long (Groq llama-3.3-70b supports ~32K tokens)
+        max_chars = 25000
+        if len(prompt) > max_chars:
+            prompt = prompt[:max_chars] + "\n\n[Texte tronqué]"
+        
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1024,
+        }
+        
+        start_time = time.time()
+        
+        for attempt in range(self.max_retries):
+            try:
+                # Create fresh client for each attempt
+                client = httpx.Client(timeout=self.timeout)
+                try:
+                    response = client.post(
+                        f"{self.base_url}/chat/completions",
+                        json=payload,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    
+                    return LLMResponse(
+                        content=data["choices"][0]["message"]["content"],
+                        model=data.get("model", self.model),
+                        duration_ms=duration_ms,
+                        raw_response=data,
+                    )
+                finally:
+                    client.close()
+            except httpx.HTTPStatusError as e:
+                # Handle 429 (rate limit) with longer backoff
+                if e.response.status_code == 429:
+                    wait_time = 5 * (2 ** attempt)  # 5, 10, 20 seconds
+                    if attempt < self.max_retries - 1:
+                        time.sleep(wait_time)
+                        continue
+                if attempt == self.max_retries - 1:
+                    raise RuntimeError(f"Groq API error after {self.max_retries} attempts: {e}")
+            except httpx.HTTPError as e:
+                if attempt == self.max_retries - 1:
+                    raise RuntimeError(f"Groq API error after {self.max_retries} attempts: {e}")
+                time.sleep(2 ** attempt)
+        
+        raise RuntimeError("Unexpected error in _call_api")
+
+    def extract_entities(self, document_text: str) -> dict:
+        from src.services.document_extractor import DocumentExtractor
+        prompt = build_extraction_prompt(document_text)
+        response = self._call_api(prompt)
+        llm_result = self._parse_json_response(response.content)
+
+        doc_extractor = DocumentExtractor()
+        regex_result = doc_extractor.extract_cps_metadata(document_text)
+
+        return merge_extraction_with_fallback(llm_result, regex_result)
+
+    def analyze_document(self, document_text: str) -> dict:
+        prompt = build_analysis_prompt(document_text)
+        response = self._call_api(prompt)
+        return self._parse_json_response(response.content, is_extraction=False)
+
+    def generate_recommendations(self, document_text: str, issues: dict) -> dict:
+        issues_str = json.dumps(issues, indent=2)
+        prompt = build_recommendation_prompt(document_text, issues_str)
+        response = self._call_api(prompt)
+        return self._parse_json_response(response.content)
+
+    def analyze_full(self, document_text: str) -> dict:
+        extraction = self.extract_entities(document_text)
+        
+        analysis = self.analyze_document(document_text)
+        
+        if analysis.get("issues"):
+            recommendations = self.generate_recommendations(document_text, analysis)
+        else:
+            recommendations = {"recommendations": []}
+        
+        return {
+            "extraction": extraction,
+            "analysis": analysis,
+            "recommendations": recommendations,
+        }
+
+    def _parse_json_response(self, content: str, is_extraction: bool = True) -> dict:
+        content = content.strip()
+
+        if content.startswith("```json"):
+            content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+
+        if content.endswith("```"):
+            content = content[:-3]
+
+        content = content.strip()
+
+        try:
+            parsed = json.loads(content)
+            if is_extraction:
+                return validate_extraction_schema(parsed)
+            return parsed
+        except json.JSONDecodeError:
+            pass
+
+        json_match = content.find("{")
+        if json_match != -1:
+            try:
+                parsed = json.loads(content[json_match:])
+                if is_extraction:
+                    return validate_extraction_schema(parsed)
+                return parsed
+            except json.JSONDecodeError:
+                depth = 0
+                end_pos = json_match
+                for i, c in enumerate(content[json_match:], json_match):
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end_pos = i + 1
+                            break
+                try:
+                    parsed = json.loads(content[json_match:end_pos])
+                    if is_extraction:
+                        return validate_extraction_schema(parsed)
+                    return parsed
+                except (json.JSONDecodeError, IndexError):
+                    pass
+
+        if is_extraction:
+            return {"extraction": _default_extraction()}
+        return {"resume": {"total_problemes": 0, "critiques": 0, "eleves": 0, "moyens": 0, "faibles": 0}, "problemes": []}
+
+    def health_check(self) -> bool:
+        try:
+            response = self.client.get(
+                f"{self.base_url}/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def close(self):
+        self.client.close()
 
     def __enter__(self):
         return self
@@ -570,9 +1018,16 @@ class OllamaAnalyzer:
         raise RuntimeError("Unexpected error in _call_api")
 
     def extract_entities(self, document_text: str) -> dict:
+        from src.services.document_extractor import DocumentExtractor
         prompt = build_extraction_prompt(document_text)
         response = self._call_api(prompt)
-        return self._parse_json_response(response.content)
+        llm_result = self._parse_json_response(response.content)
+
+        # Use regex extraction as fallback for empty/None fields
+        doc_extractor = DocumentExtractor()
+        regex_result = doc_extractor.extract_cps_metadata(document_text)
+
+        return merge_extraction_with_fallback(llm_result, regex_result)
 
     def analyze_document(self, document_text: str) -> dict:
         prompt = build_analysis_prompt(document_text)
@@ -601,30 +1056,80 @@ class OllamaAnalyzer:
             "recommendations": recommendations,
         }
 
-    def _parse_json_response(self, content: str) -> dict:
+    def _repair_json(self, content: str) -> str:
+        """Repair malformed JSON by fixing common issues."""
         content = content.strip()
         
+        if content.startswith("```"):
+            content = content[3:]
+            if content.startswith("json"):
+                content = content[4:]
+        if content.endswith("```"):
+            content = content[:-3]
+        
+        first_brace = content.find("{")
+        if first_brace > 0:
+            content = content[first_brace:]
+        
+        last_brace = content.rfind("}")
+        if last_brace >= 0:
+            content = content[:last_brace + 1]
+        
+        content = content.replace("'", '"')
+        content = re.sub(r',\s*}', '}', content)
+        content = re.sub(r',\s*]', ']', content)
+        
+        return content.strip()
+    
+    def _parse_json_response(self, content: str) -> dict:
+        content = content.strip()
+
+        repaired = self._repair_json(content)
+        try:
+            parsed = json.loads(repaired)
+            return validate_extraction_schema(parsed)
+        except json.JSONDecodeError:
+            pass
+
         if content.startswith("```json"):
             content = content[7:]
         elif content.startswith("```"):
             content = content[3:]
-        
+
         if content.endswith("```"):
             content = content[:-3]
-        
+
         content = content.strip()
-        
+
         try:
-            return json.loads(content)
+            parsed = json.loads(content)
+            return validate_extraction_schema(parsed)
         except json.JSONDecodeError:
-            json_match = content.find("{")
-            if json_match != -1:
+            pass
+
+        json_match = content.find("{")
+        if json_match != -1:
+            try:
+                parsed = json.loads(content[json_match:])
+                return validate_extraction_schema(parsed)
+            except json.JSONDecodeError:
+                depth = 0
+                end_pos = json_match
+                for i, c in enumerate(content[json_match:], json_match):
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end_pos = i + 1
+                            break
                 try:
-                    return json.loads(content[json_match:])
-                except json.JSONDecodeError:
+                    parsed = json.loads(content[json_match:end_pos])
+                    return validate_extraction_schema(parsed)
+                except (json.JSONDecodeError, IndexError):
                     pass
-            
-            return {"raw": content, "error": "Failed to parse JSON"}
+
+        return {"extraction": _default_extraction()}
 
     def health_check(self) -> bool:
         try:
@@ -645,41 +1150,22 @@ class OllamaAnalyzer:
 
 class AnalyzerWithFallback:
     def __init__(self):
-        self.hf_analyzer: Optional[HuggingFaceAnalyzer] = None
-        self.ollama_analyzer: Optional[OllamaAnalyzer] = None
+        self.groq_analyzer: Optional[GroqAnalyzer] = None
         self._initialize()
 
     def _initialize(self):
-        if settings.USE_HUGGINGFACE:
-            try:
-                print("Initializing HuggingFaceAnalyzer (primary)...")
-                self.hf_analyzer = HuggingFaceAnalyzer()
-                print("HuggingFaceAnalyzer initialized successfully")
-            except Exception as e:
-                print(f"Failed to initialize HuggingFaceAnalyzer: {e}")
-                print("Will use OllamaAnalyzer as fallback")
-                self.hf_analyzer = None
-        
-        if self.hf_analyzer is None:
-            try:
-                print("Initializing OllamaAnalyzer...")
-                self.ollama_analyzer = OllamaAnalyzer()
-                if self.ollama_analyzer.health_check():
-                    print("OllamaAnalyzer initialized successfully")
-                else:
-                    self.ollama_analyzer.close()
-                    self.ollama_analyzer = None
-                    raise RuntimeError("Ollama is not available")
-            except Exception as e:
-                print(f"Failed to initialize OllamaAnalyzer: {e}")
-                self.ollama_analyzer = None
+        print("Initializing GroqAnalyzer...")
+        self.groq_analyzer = GroqAnalyzer()
+        if not self.groq_analyzer.health_check():
+            self.groq_analyzer.close()
+            self.groq_analyzer = None
+            raise RuntimeError("Groq is not available")
+        print("GroqAnalyzer initialized successfully")
 
     @property
     def analyzer(self):
-        if self.hf_analyzer is not None:
-            return self.hf_analyzer
-        if self.ollama_analyzer is not None:
-            return self.ollama_analyzer
+        if self.groq_analyzer is not None:
+            return self.groq_analyzer
         raise RuntimeError("No analyzer available")
 
     def extract_entities(self, document_text: str) -> dict:
@@ -695,24 +1181,14 @@ class AnalyzerWithFallback:
         return self.analyzer.analyze_full(document_text)
 
     def health_check(self) -> bool:
-        if self.hf_analyzer is not None and self.hf_analyzer.health_check():
-            return True
-        if self.ollama_analyzer is not None:
-            return self.ollama_analyzer.health_check()
-        return False
+        return self.groq_analyzer is not None and self.groq_analyzer.health_check()
 
     def get_model_name(self) -> str:
-        if self.hf_analyzer is not None:
-            return self.hf_analyzer.model_name
-        if self.ollama_analyzer is not None:
-            return self.ollama_analyzer.model
-        return "none"
+        return self.groq_analyzer.model if self.groq_analyzer else "none"
 
     def close(self):
-        if self.hf_analyzer is not None:
-            self.hf_analyzer.close()
-        if self.ollama_analyzer is not None:
-            self.ollama_analyzer.close()
+        if self.groq_analyzer is not None:
+            self.groq_analyzer.close()
 
     def __enter__(self):
         return self

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AnalysisReport, AnalysisStatus, HealthStatus, FeedbackRequest } from '../types';
+import type { AnalysisReport, AnalysisStatus, HealthStatus, FeedbackRequest, RawAnalysisResponse } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -23,9 +23,9 @@ export const analysisApi = {
     return response.data;
   },
 
-  analyzeText: async (text: string): Promise<AnalysisReport> => {
-    const response = await api.post<AnalysisReport>('/analyze/text', { text });
-    return response.data;
+  analyzeText: async (text: string): Promise<RawAnalysisResponse> => {
+    const response = await api.post<RawAnalysisResponse>('/analyze/text', { text });
+    return (response.data.result || response.data) as RawAnalysisResponse;
   },
 
   getAnalysisStatus: async (id: string): Promise<AnalysisStatus> => {
@@ -40,6 +40,16 @@ export const analysisApi = {
 
   submitFeedback: async (feedback: FeedbackRequest) => {
     const response = await api.post('/feedback', feedback);
+    return response.data;
+  },
+
+  getAnalyses: async () => {
+    const response = await api.get('/analyses');
+    return response.data;
+  },
+
+  deleteAnalysis: async (id: string) => {
+    const response = await api.delete(`/analyses/${id}`);
     return response.data;
   },
 };
